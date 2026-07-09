@@ -4,7 +4,8 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ClaudeAgentDriver } from './drivers/claudeAgent.js';
-import type { PermissionDecision, SessionDriver, SessionSnapshot } from './types.js';
+import * as g from './git.js';
+import type { MergeStatus, PermissionDecision, SessionDriver, SessionSnapshot } from './types.js';
 
 const exec = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -15,10 +16,12 @@ interface Session {
   goal: string;
   repo: string;
   branch: string;
+  baseBranch: string;
   cwd: string;
   baseURL?: string;
   createdAt: number;
   driver: SessionDriver;
+  merge?: MergeStatus; // cached; recomputed on demand + after merges
 }
 
 export interface CreateSessionInput {
@@ -52,9 +55,11 @@ export class SessionManager {
       goal: s.goal,
       repo: s.repo,
       branch: s.branch,
+      baseBranch: s.baseBranch,
       cwd: s.cwd,
       baseURL: s.baseURL,
       createdAt: s.createdAt,
+      merge: s.merge,
       ...s.driver.getState(),
     }));
   }
@@ -70,6 +75,10 @@ export class SessionManager {
     const cwd = path.join(WORKTREES_DIR, id);
     mkdirSync(WORKTREES_DIR, { recursive: true });
 
+    // The base branch this session will merge back into = the repo's HEAD branch
+    // at spawn time.
+    const baseBranch = (await g.currentBranch(input.repo)) || 'HEAD';
+
     // Isolate the session on its own worktree + branch off the repo's HEAD.
     await exec('git', ['-C', input.repo, 'worktree', 'add', '-b', branch, cwd, 'HEAD']);
 
@@ -79,6 +88,7 @@ export class SessionManager {
       goal: input.goal,
       repo: input.repo,
       branch,
+      baseBranch,
       cwd,
       baseURL: input.baseURL,
       createdAt: Date.now(),
@@ -116,18 +126,29 @@ export class SessionManager {
   openInEditor(id: string): boolean {
     const s = this.sessions.get(id);
     if (!s) return false;
+    return this.launchEditor(s.cwd);
+  }
+
+  /** Open the base repo's main tree in an editor (e.g. to resolve a conflict). */
+  openRepoInEditor(id: string): boolean {
+    const s = this.sessions.get(id);
+    if (!s) return false;
+    return this.launchEditor(s.repo);
+  }
+
+  private launchEditor(dir: string): boolean {
     const editor = process.env.COCKPIT_EDITOR ?? 'code';
     // shell:true resolves `code` -> code.cmd on Windows. Pass ONE quoted command
-    // string (not an args array) to avoid DEP0190; cwd is a cockpit-controlled
-    // path (fixed base + sanitized id), and we quote it defensively.
-    const safeCwd = s.cwd.replace(/"/g, '');
-    const child = spawn(`${editor} -n "${safeCwd}"`, {
+    // string (not an args array) to avoid DEP0190; the path is cockpit-controlled
+    // and we strip quotes defensively.
+    const safe = dir.replace(/"/g, '');
+    const child = spawn(`${editor} -n "${safe}"`, {
       shell: true,
       detached: true,
       stdio: 'ignore',
     });
     child.on('error', () => {
-      /* editor not on PATH — surfaced to the caller via the thrown-safe path below */
+      /* editor not on PATH */
     });
     child.unref();
     return true;
@@ -138,6 +159,85 @@ export class SessionManager {
     if (!s) return false;
     await s.driver.interrupt();
     return true;
+  }
+
+  // ---- merge sequencing ----
+
+  /** Recompute one session's merge status (ahead/behind, dirty, conflict preflight). */
+  async refreshMergeStatus(id: string): Promise<boolean> {
+    const s = this.sessions.get(id);
+    if (!s) return false;
+    await this.computeMerge(s);
+    this.emit();
+    return true;
+  }
+
+  /** Recompute merge status for every session (e.g. after a merge lands). */
+  async refreshAllMergeStatus(): Promise<void> {
+    await Promise.all([...this.sessions.values()].map((s) => this.computeMerge(s)));
+    this.emit();
+  }
+
+  private async computeMerge(s: Session): Promise<void> {
+    try {
+      const [{ ahead, behind }, dirty, preview, merging] = await Promise.all([
+        g.aheadBehind(s.repo, s.baseBranch, s.branch),
+        g.isClean(s.cwd).then((c) => !c),
+        g.mergePreview(s.repo, s.baseBranch, s.branch),
+        this.isBranchMidMerge(s),
+      ]);
+      s.merge = {
+        baseBranch: s.baseBranch,
+        ahead,
+        behind,
+        dirty,
+        preview: preview.preview,
+        conflictFiles: preview.conflictFiles,
+        checkedAt: Date.now(),
+        merging,
+      };
+    } catch {
+      s.merge = {
+        baseBranch: s.baseBranch,
+        ahead: 0,
+        behind: 0,
+        dirty: false,
+        preview: 'unknown',
+        conflictFiles: [],
+        checkedAt: Date.now(),
+        merging: false,
+      };
+    }
+  }
+
+  private async isBranchMidMerge(s: Session): Promise<boolean> {
+    // Best-effort: is the main tree mid-merge, and is it our branch being merged?
+    if (!(await g.mergeInProgress(s.repo))) return false;
+    return this.mergingBranch === s.branch;
+  }
+
+  private mergingBranch: string | null = null;
+
+  /** Execute the merge of a session's branch into its base (guarded). */
+  async merge(id: string): Promise<{ ok: boolean; result: any }> {
+    const s = this.sessions.get(id);
+    if (!s) return { ok: false, result: { status: 'error', reason: 'no such session' } };
+    const result = await g.mergeBranch(s.repo, s.baseBranch, s.branch);
+    if (result.status === 'conflict') this.mergingBranch = s.branch;
+    if (result.status === 'merged') this.mergingBranch = null;
+    // A merge changes the base for every sibling on the same base — recompute all.
+    await this.refreshAllMergeStatus();
+    return { ok: result.status === 'merged' || result.status === 'conflict', result };
+  }
+
+  /** Abort an in-progress conflicted merge in a session's repo. */
+  async abortMerge(id: string): Promise<boolean> {
+    const s = this.sessions.get(id);
+    if (!s) return false;
+    const ok = await g.abortMerge(s.repo);
+    this.mergingBranch = null;
+    await this.refreshAllMergeStatus();
+    return ok;
   }
 
   /** Dispose the driver and remove the worktree (branch is kept for merging). */

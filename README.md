@@ -73,12 +73,39 @@ click **Allow** / **Deny**.
 | POST | `/api/sessions/:id/interrupt` | — | Interrupt the agent |
 | DELETE | `/api/sessions/:id` | — | Dispose + remove worktree |
 
+## Merge sequencing (shipped)
+
+N parallel branches WILL conflict, and merging one changes the base for the rest. The
+cockpit makes this visible and drives it safely:
+
+- **Per-session merge status** (`src/git.ts`): base branch, ahead/behind counts, whether
+  the worktree is dirty, and an accurate **conflict preflight** — computed by checking out
+  the base in a throwaway detached worktree and doing a real trial merge (works on any git;
+  no 2.38 `merge-tree --write-tree` dependency), then discarded. Cached; recompute with
+  **↻ Check all merges** or per-card.
+- **Sequenced merge**: **Merge → \<base\>** merges a session's branch into its base in the
+  repo's main tree, then **recomputes every sibling** — so a branch that was clean flips to
+  `conflict` the moment an overlapping branch lands ahead of it (the whole point).
+- **Guarded execution**: refuses unless the main checkout is clean and on the base branch,
+  so nothing gets clobbered.
+- **Conflict handling**: on conflict the merge is left in place; **Open repo** opens the
+  base repo in VS Code to resolve, **Abort merge** rolls it back.
+
+Verified end-to-end: two branches clean alone → merge A → B auto-flips to conflict on the
+shared file → merge B reports conflict + leaves the tree mid-merge → Abort recovers cleanly;
+plus the dirty-tree refusal guard.
+
+## Open in VS Code (shipped)
+
+Per-session **⧉ VS Code** button opens that worktree in a new window (`code -n <worktree>`,
+`COCKPIT_EDITOR` overrides) so you can dive in and take over manually.
+
 ## Known open work (next slices)
 
-- **Merge sequencing** — N parallel branches WILL conflict; the dispatcher must own
-  sequencing merges back to the integration branch. The cockpit makes it visible but does
-  not solve it yet. This is the genuinely hard part.
-- "Open in VS Code" button per worktree (take over manually on demand).
-- Tier-2 drivers (native non-Claude agents).
+- Tier-2 drivers (native non-Claude agents) — **parked** for now. Tier-1 (route a session to
+  a local/OpenAI-compatible model via a gateway using per-session `baseURL`) already works;
+  target for a local LLM on Apple Silicon via a LiteLLM Anthropic-passthrough proxy.
 - Context-% is best-effort (last-turn input tokens vs model window); wire a truer measure.
 - Auth/hardening: currently localhost-only, no auth; fine for a single local operator.
+- Repo path must be the OS-native form (e.g. `C:/github/ioSender`), which is what the UI
+  form expects — git is invoked with it directly.

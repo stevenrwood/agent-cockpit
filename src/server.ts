@@ -61,6 +61,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, manager.snapshots());
     }
 
+    // --- recompute merge status for all sessions ---
+    if (method === 'POST' && url.pathname === '/api/refresh-merge') {
+      await manager.refreshAllMergeStatus();
+      return send(res, 200, { ok: true });
+    }
+
     // --- create a session ---
     if (method === 'POST' && url.pathname === '/api/sessions') {
       const body = await readBody(req);
@@ -93,6 +99,23 @@ const server = http.createServer(async (req, res) => {
       }
       if (method === 'POST' && action === 'open-vscode') {
         const ok = manager.openInEditor(id);
+        return send(res, ok ? 200 : 404, { ok });
+      }
+      if (method === 'POST' && action === 'refresh-merge') {
+        const ok = await manager.refreshMergeStatus(id);
+        return send(res, ok ? 200 : 404, { ok });
+      }
+      if (method === 'POST' && action === 'merge') {
+        const { ok, result } = await manager.merge(id);
+        return send(res, 200, { ok, result });
+      }
+      if (method === 'POST' && action === 'abort-merge') {
+        const ok = await manager.abortMerge(id);
+        return send(res, ok ? 200 : 404, { ok });
+      }
+      // "Open the base repo (main tree) in VS Code" — to resolve a conflict.
+      if (method === 'POST' && action === 'open-repo') {
+        const ok = manager.openRepoInEditor(id);
         return send(res, ok ? 200 : 404, { ok });
       }
       if (method === 'DELETE' && !action) {

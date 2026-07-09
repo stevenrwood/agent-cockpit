@@ -68,13 +68,26 @@ export interface SessionDriver {
   dispose(): void;
 }
 
+export interface MergeStatus {
+  baseBranch: string;
+  ahead: number; // commits on this branch not yet in base
+  behind: number; // commits in base not in this branch
+  dirty: boolean; // uncommitted changes in the session worktree
+  preview: 'clean' | 'conflict' | 'up-to-date' | 'unknown';
+  conflictFiles: string[];
+  checkedAt: number;
+  merging: boolean; // a conflicted merge of THIS branch is live in the main tree
+}
+
 /** Shell-level record: worktree/meta + a live snapshot of the driver's state. */
 export interface SessionSnapshot extends DriverState {
   id: string;
   goal: string;
   repo: string;
   branch: string;
+  baseBranch: string;
   cwd: string;
   baseURL?: string;
   createdAt: number;
+  merge?: MergeStatus;
 }

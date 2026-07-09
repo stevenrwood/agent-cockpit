@@ -82,12 +82,25 @@
       .actions { display: flex; gap: 6px; flex-wrap: wrap; }
       .empty { color: var(--dim); text-align: center; padding: 40px; }
       details summary { cursor: pointer; color: var(--dim); font-size: 12px; }
+      .merge {
+        background: var(--panel2); border: 1px solid var(--border);
+        border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
+      }
+      .merge.conflict { border-color: var(--warn); }
+      .mbadge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; text-transform: uppercase; }
+      .mbadge.clean { background: #10351f; color: var(--ok); }
+      .mbadge.conflict { background: #3a2410; color: var(--warn); }
+      .mbadge.up-to-date { background: #22262d; color: var(--idle); }
+      .mbadge.unknown { background: #22262d; color: var(--idle); }
+      .merge .files { font-size: 11px; color: var(--warn); white-space: pre-wrap; }
+      .merge button { padding: 4px 8px; font-size: 12px; }
     </style>
   </head>
   <body>
     <header>
       <h1>⌁ AGENT COCKPIT</h1>
       <span class="count" id="count">0 sessions</span>
+      <button class="ghost" id="refreshMerge" style="margin-left:auto">↻ Check all merges</button>
     </header>
     <main>
       <form class="new" id="newForm">
@@ -133,6 +146,18 @@
             const inp = el.querySelector('[data-msg]');
             if (inp && inp.value.trim()) { post(`/api/sessions/${s.id}/message`, { text: inp.value }); inp.value = ''; }
           });
+          el.querySelector('[data-refresh-merge]')?.addEventListener('click', () =>
+            post(`/api/sessions/${s.id}/refresh-merge`, {}));
+          el.querySelector('[data-merge]')?.addEventListener('click', async (e) => {
+            const btn = e.target; btn.disabled = true; btn.textContent = 'merging…';
+            const r = await post(`/api/sessions/${s.id}/merge`, {}).then((x) => x.json()).catch(() => null);
+            if (r && r.result && r.result.status === 'refused') alert('Merge refused: ' + r.result.reason);
+            else if (r && r.result && r.result.status === 'error') alert('Merge error: ' + r.result.reason);
+          });
+          el.querySelector('[data-abort-merge]')?.addEventListener('click', () =>
+            post(`/api/sessions/${s.id}/abort-merge`, {}));
+          el.querySelector('[data-open-repo]')?.addEventListener('click', () =>
+            post(`/api/sessions/${s.id}/open-repo`, {}));
         }
       }
 
@@ -164,6 +189,7 @@
             <div class="ctx"><i style="width:${ctxPct}%"></i></div>
           </div>
           ${perm}
+          ${mergeHtml(s)}
           ${s.lastText ? `<div class="preview">${esc(s.lastText)}</div>` : ''}
           <div class="actions">
             <input data-msg placeholder="send a follow-up message…" style="flex:1" />
@@ -171,6 +197,34 @@
             <button class="ghost" data-vscode title="Open this worktree in a new VS Code window">⧉ VS Code</button>
             <button class="ghost" data-interrupt>Interrupt</button>
             <button class="ghost" data-remove>✕ Remove</button>
+          </div>
+        </div>`;
+      }
+
+      function mergeHtml(s) {
+        const m = s.merge;
+        const cls = m && m.preview === 'conflict' ? ' conflict' : '';
+        if (!m) {
+          return `<div class="merge"><div class="row between">
+            <span class="meta">merge → ${esc(s.baseBranch)} · not checked</span>
+            <button data-refresh-merge>↻ check</button></div></div>`;
+        }
+        const canMerge = m.ahead > 0 && m.preview !== 'up-to-date';
+        const files = m.conflictFiles.length
+          ? `<div class="files">conflicts: ${m.conflictFiles.map(esc).join(', ')}</div>` : '';
+        const conflictActions = (m.preview === 'conflict' || m.merging)
+          ? `<button data-open-repo title="Open base repo to resolve">⧉ Open repo</button>
+             <button class="deny" data-abort-merge>Abort merge</button>` : '';
+        return `<div class="merge${cls}">
+          <div class="row between">
+            <span class="meta">merge → ${esc(m.baseBranch)} · ↑${m.ahead} ↓${m.behind}${m.dirty ? ' · ⚠ dirty' : ''}</span>
+            <span class="mbadge ${m.preview}">${m.preview}</span>
+          </div>
+          ${files}
+          <div class="row">
+            <button data-refresh-merge>↻</button>
+            ${canMerge ? `<button class="ok" data-merge>Merge → ${esc(m.baseBranch)}</button>` : ''}
+            ${conflictActions}
           </div>
         </div>`;
       }
@@ -194,6 +248,9 @@
         if (!r.ok) { const err = await r.json().catch(() => ({})); alert('Failed: ' + (err.error || r.status)); return; }
         f.goal.value = '';
       });
+
+      document.getElementById('refreshMerge').addEventListener('click', () =>
+        post('/api/refresh-merge', {}));
 
       // Live updates via SSE.
       const ev = new EventSource('/api/events');
