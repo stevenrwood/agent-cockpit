@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -109,6 +109,27 @@ export class SessionManager {
     const s = this.sessions.get(id);
     if (!s) return false;
     s.driver.sendMessage(text);
+    return true;
+  }
+
+  /** Open the session's worktree in a new editor window (take over manually). */
+  openInEditor(id: string): boolean {
+    const s = this.sessions.get(id);
+    if (!s) return false;
+    const editor = process.env.COCKPIT_EDITOR ?? 'code';
+    // shell:true resolves `code` -> code.cmd on Windows. Pass ONE quoted command
+    // string (not an args array) to avoid DEP0190; cwd is a cockpit-controlled
+    // path (fixed base + sanitized id), and we quote it defensively.
+    const safeCwd = s.cwd.replace(/"/g, '');
+    const child = spawn(`${editor} -n "${safeCwd}"`, {
+      shell: true,
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', () => {
+      /* editor not on PATH — surfaced to the caller via the thrown-safe path below */
+    });
+    child.unref();
     return true;
   }
 

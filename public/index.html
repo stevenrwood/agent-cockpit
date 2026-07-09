@@ -125,6 +125,8 @@
             post(`/api/sessions/${s.id}/permission`, { permissionId: s.pending.id, allow: false, message: 'Denied by operator.' }));
           el.querySelector('[data-interrupt]')?.addEventListener('click', () =>
             post(`/api/sessions/${s.id}/interrupt`, {}));
+          el.querySelector('[data-vscode]')?.addEventListener('click', () =>
+            post(`/api/sessions/${s.id}/open-vscode`, {}));
           el.querySelector('[data-remove]')?.addEventListener('click', () =>
             fetch(`/api/sessions/${s.id}`, { method: 'DELETE' }));
           el.querySelector('[data-send]')?.addEventListener('click', () => {
@@ -166,6 +168,7 @@
           <div class="actions">
             <input data-msg placeholder="send a follow-up message…" style="flex:1" />
             <button data-send>Send</button>
+            <button class="ghost" data-vscode title="Open this worktree in a new VS Code window">⧉ VS Code</button>
             <button class="ghost" data-interrupt>Interrupt</button>
             <button class="ghost" data-remove>✕ Remove</button>
           </div>

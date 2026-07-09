@@ -91,6 +91,10 @@ const server = http.createServer(async (req, res) => {
         const ok = await manager.interrupt(id);
         return send(res, ok ? 200 : 404, { ok });
       }
+      if (method === 'POST' && action === 'open-vscode') {
+        const ok = manager.openInEditor(id);
+        return send(res, ok ? 200 : 404, { ok });
+      }
       if (method === 'DELETE' && !action) {
         const ok = await manager.remove(id);
         return send(res, ok ? 200 : 404, { ok });
