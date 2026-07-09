@@ -1,0 +1,19 @@
+{
+  "name": "agent-cockpit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mission-control cockpit for driving parallel Claude Code sessions (Agent SDK) in isolated git worktrees.",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.0"
+  }
+}

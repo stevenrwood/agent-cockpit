@@ -1,0 +1,227 @@
+import { query, type Query } from '@anthropic-ai/claude-agent-sdk';
+import type {
+  DriverState,
+  DriverStartOptions,
+  PermissionDecision,
+  SessionDriver,
+} from '../types.js';
+
+// Minimal push-based async input queue. Keeping the input stream OPEN is what
+// lets `canUseTool` fire (a finite string prompt closes the stream before the
+// callback can run) and lets us feed follow-up messages into a live session.
+class InputQueue {
+  private buffered: any[] = [];
+  private resolver: ((r: IteratorResult<any>) => void) | null = null;
+  private closed = false;
+
+  push(text: string) {
+    const msg = {
+      type: 'user',
+      message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+    };
+    if (this.resolver) {
+      this.resolver({ value: msg, done: false });
+      this.resolver = null;
+    } else {
+      this.buffered.push(msg);
+    }
+  }
+
+  close() {
+    this.closed = true;
+    if (this.resolver) {
+      this.resolver({ value: undefined, done: true });
+      this.resolver = null;
+    }
+  }
+
+  async *[Symbol.asyncIterator]() {
+    while (true) {
+      if (this.buffered.length) {
+        yield this.buffered.shift();
+        continue;
+      }
+      if (this.closed) return;
+      const r = await new Promise<IteratorResult<any>>((res) => (this.resolver = res));
+      if (r.done) return;
+      yield r.value;
+    }
+  }
+}
+
+type PendingResolver = (result: any) => void;
+
+export class ClaudeAgentDriver implements SessionDriver {
+  readonly provider = 'claude';
+
+  private state: DriverState = {
+    provider: 'claude',
+    status: 'starting',
+    turns: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: 0,
+  };
+
+  private input = new InputQueue();
+  private q: Query | null = null;
+  private abort = new AbortController();
+  private permCounter = 0;
+  private pending = new Map<string, PendingResolver>();
+
+  constructor(private onChange: () => void) {}
+
+  getState(): DriverState {
+    return { ...this.state };
+  }
+
+  private set(patch: Partial<DriverState>) {
+    this.state = { ...this.state, ...patch };
+    this.onChange();
+  }
+
+  start(opts: DriverStartOptions): void {
+    // Tier-1 provider swap: point the Claude Code harness at a gateway without
+    // touching global process.env — `env` is per-query in the SDK.
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+    if (opts.baseURL) env.ANTHROPIC_BASE_URL = opts.baseURL;
+    if (opts.apiKey) env.ANTHROPIC_API_KEY = opts.apiKey;
+
+    this.q = query({
+      prompt: this.input as any,
+      options: {
+        cwd: opts.cwd,
+        model: opts.model,
+        env,
+        permissionMode: opts.permissionMode ?? 'default',
+        // Load nothing from disk — the cockpit is the source of truth for
+        // permissions, so every non-trivial tool routes through canUseTool.
+        settingSources: [],
+        includePartialMessages: false,
+        canUseTool: (toolName, input) => this.requestPermission(toolName, input),
+        abortController: this.abort,
+      } as any,
+    });
+
+    this.input.push(opts.goal);
+    this.set({ status: 'running', model: opts.model });
+    this.consume().catch((err) => {
+      this.set({ status: 'error', error: String(err?.message ?? err) });
+    });
+  }
+
+  private requestPermission(toolName: string, input: Record<string, unknown>): Promise<any> {
+    const id = `p${++this.permCounter}`;
+    return new Promise((resolve) => {
+      this.pending.set(id, resolve);
+      this.set({
+        status: 'awaiting-input',
+        pending: { id, toolName, input, createdAt: Date.now() },
+      });
+    });
+  }
+
+  answerPermission(permissionId: string, decision: PermissionDecision): boolean {
+    const resolve = this.pending.get(permissionId);
+    if (!resolve) return false;
+    this.pending.delete(permissionId);
+    if (decision.allow) {
+      resolve({ behavior: 'allow', updatedInput: this.state.pending?.input ?? {} });
+    } else {
+      resolve({ behavior: 'deny', message: decision.message ?? 'Denied by operator.' });
+    }
+    this.set({ status: 'running', pending: undefined });
+    return true;
+  }
+
+  sendMessage(text: string): void {
+    this.input.push(text);
+    this.set({ status: 'running' });
+  }
+
+  async interrupt(): Promise<void> {
+    try {
+      await this.q?.interrupt();
+    } catch {
+      /* ignore */
+    }
+    this.set({ status: 'interrupted', pending: undefined });
+  }
+
+  dispose(): void {
+    this.input.close();
+    try {
+      this.abort.abort();
+    } catch {
+      /* ignore */
+    }
+    try {
+      this.q?.close?.();
+    } catch {
+      /* ignore */
+    }
+    if (this.state.status !== 'error' && this.state.status !== 'interrupted') {
+      this.set({ status: 'done', pending: undefined });
+    }
+  }
+
+  private async consume(): Promise<void> {
+    if (!this.q) return;
+    for await (const msg of this.q) {
+      switch (msg.type) {
+        case 'system':
+          if (msg.subtype === 'init') {
+            this.set({ providerSessionId: msg.session_id, model: msg.model });
+          }
+          break;
+
+        case 'assistant': {
+          const text = extractText(msg.message?.content);
+          const usage = msg.message?.usage;
+          const contextUsed = usage
+            ? (usage.input_tokens ?? 0) +
+              (usage.cache_read_input_tokens ?? 0) +
+              (usage.cache_creation_input_tokens ?? 0)
+            : this.state.contextUsed;
+          this.set({
+            status: 'running',
+            lastText: text || this.state.lastText,
+            contextUsed,
+          });
+          break;
+        }
+
+        case 'result': {
+          const modelName = Object.keys(msg.modelUsage ?? {})[0];
+          const mu = modelName ? msg.modelUsage[modelName] : undefined;
+          this.set({
+            status: 'idle', // turn complete; session stays alive for follow-ups
+            turns: msg.num_turns,
+            costUsd: msg.total_cost_usd,
+            inputTokens: msg.usage?.input_tokens ?? this.state.inputTokens,
+            outputTokens: msg.usage?.output_tokens ?? this.state.outputTokens,
+            contextWindow: mu?.contextWindow ?? this.state.contextWindow,
+            lastText: msg.subtype === 'success' ? msg.result || this.state.lastText : this.state.lastText,
+            error: msg.subtype !== 'success' ? msg.subtype : this.state.error,
+          });
+          break;
+        }
+      }
+    }
+    // Input stream closed and generator finished.
+    if (this.state.status !== 'error' && this.state.status !== 'interrupted') {
+      this.set({ status: 'done', pending: undefined });
+    }
+  }
+}
+
+function extractText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+    .map((b: any) => b.text)
+    .join('')
+    .trim();
+}
