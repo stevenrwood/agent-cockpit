@@ -83,17 +83,26 @@ cockpit makes this visible and drives it safely:
   the base in a throwaway detached worktree and doing a real trial merge (works on any git;
   no 2.38 `merge-tree --write-tree` dependency), then discarded. Cached; recompute with
   **↻ Check all merges** or per-card.
-- **Sequenced merge**: **Merge → \<base\>** merges a session's branch into its base in the
-  repo's main tree, then **recomputes every sibling** — so a branch that was clean flips to
-  `conflict` the moment an overlapping branch lands ahead of it (the whole point).
-- **Guarded execution**: refuses unless the main checkout is clean and on the base branch,
-  so nothing gets clobbered.
-- **Conflict handling**: on conflict the merge is left in place; **Open repo** opens the
-  base repo in VS Code to resolve, **Abort merge** rolls it back.
+- **Dedicated integration worktree**: merges never touch your main checkout. The cockpit
+  owns a per-base **integration branch** `cockpit/int/<base>` in its own worktree
+  (`worktrees/_int/…`), created at the base tip on first merge. **Merge → \<integration\>**
+  merges a session's branch there, then **recomputes every sibling** — so a branch that was
+  clean flips to `conflict` the moment an overlapping branch lands ahead of it (the whole
+  point). Preflight and ahead/behind are measured against the integration branch once it
+  exists, so sequencing shows through.
+- **Conflict handling**: isolated in the integration worktree — your main tree stays clean
+  and on its branch throughout. **Open integration** opens that worktree in VS Code to
+  resolve; **Abort merge** rolls it back. A second merge is refused while a conflict is
+  unresolved.
+- **Promote → \<base\>**: when the integration branch looks good, fast-forward the real base
+  up to it (guarded: main checkout must be clean and on the base). Because the integration
+  branch is base + merge commits, this is a clean fast-forward.
 
-Verified end-to-end: two branches clean alone → merge A → B auto-flips to conflict on the
-shared file → merge B reports conflict + leaves the tree mid-merge → Abort recovers cleanly;
-plus the dirty-tree refusal guard.
+Verified end-to-end: two branches clean alone → merge A into integration (**main tree
+untouched** — base ref, files, and cleanliness all unchanged) → B auto-flips to conflict vs
+the integration branch → merge B conflicts inside the integration worktree (main tree still
+clean, not mid-merge) → second merge refused → Abort recovers → Promote fast-forwards the
+base up to the merged result.
 
 ## Open in VS Code (shipped)
 
@@ -109,3 +118,6 @@ Per-session **⧉ VS Code** button opens that worktree in a new window (`code -n
 - Auth/hardening: currently localhost-only, no auth; fine for a single local operator.
 - Repo path must be the OS-native form (e.g. `C:/github/ioSender`), which is what the UI
   form expects — git is invoked with it directly.
+- Integration worktrees are created lazily and kept across the process lifetime; they aren't
+  auto-garbage-collected. Prune with `git worktree remove` + delete `cockpit/int/<base>` when
+  done, or wire a cockpit teardown.

@@ -178,16 +178,57 @@ export class SessionManager {
     this.emit();
   }
 
+  // Merges land on a cockpit-owned integration branch in its OWN worktree, so
+  // the user's main checkout is never touched. Keyed by repo+base.
+  private integrations = new Map<string, { path: string; branch: string }>();
+  private mergingBranch: string | null = null;
+
+  private intBranchName(base: string): string {
+    return `cockpit/int/${base}`;
+  }
+
+  /** Create-or-reuse the integration worktree for (repo, base). */
+  private async ensureIntegration(repo: string, base: string): Promise<{ path: string; branch: string }> {
+    const key = `${repo}::${base}`;
+    const cached = this.integrations.get(key);
+    if (cached) return cached;
+
+    const branch = this.intBranchName(base);
+    await exec('git', ['-C', repo, 'worktree', 'prune']).catch(() => {});
+
+    let wtPath = await g.findWorktreeForBranch(repo, branch);
+    if (!wtPath) {
+      const safe = key.replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 60);
+      wtPath = path.join(WORKTREES_DIR, '_int', safe);
+      mkdirSync(path.join(WORKTREES_DIR, '_int'), { recursive: true });
+      if (await g.refExists(repo, branch)) {
+        await exec('git', ['-C', repo, 'worktree', 'add', wtPath, branch]);
+      } else {
+        // New integration branch starting at the base tip.
+        await exec('git', ['-C', repo, 'worktree', 'add', '-b', branch, wtPath, base]);
+      }
+    }
+    const rec = { path: wtPath, branch };
+    this.integrations.set(key, rec);
+    return rec;
+  }
+
   private async computeMerge(s: Session): Promise<void> {
     try {
-      const [{ ahead, behind }, dirty, preview, merging] = await Promise.all([
-        g.aheadBehind(s.repo, s.baseBranch, s.branch),
+      const intBranch = this.intBranchName(s.baseBranch);
+      const intPath = await g.findWorktreeForBranch(s.repo, intBranch);
+      // Preflight/counts are vs the integration branch once it exists (so
+      // sequencing shows through); until then, vs the base.
+      const target = intPath ? intBranch : s.baseBranch;
+      const [{ ahead, behind }, dirty, preview] = await Promise.all([
+        g.aheadBehind(s.repo, target, s.branch),
         g.isClean(s.cwd).then((c) => !c),
-        g.mergePreview(s.repo, s.baseBranch, s.branch),
-        this.isBranchMidMerge(s),
+        g.mergePreview(s.repo, target, s.branch),
       ]);
+      const merging = intPath ? (await g.mergeInProgress(intPath)) && this.mergingBranch === s.branch : false;
       s.merge = {
         baseBranch: s.baseBranch,
+        targetBranch: target,
         ahead,
         behind,
         dirty,
@@ -199,6 +240,7 @@ export class SessionManager {
     } catch {
       s.merge = {
         baseBranch: s.baseBranch,
+        targetBranch: s.baseBranch,
         ahead: 0,
         behind: 0,
         dirty: false,
@@ -210,34 +252,52 @@ export class SessionManager {
     }
   }
 
-  private async isBranchMidMerge(s: Session): Promise<boolean> {
-    // Best-effort: is the main tree mid-merge, and is it our branch being merged?
-    if (!(await g.mergeInProgress(s.repo))) return false;
-    return this.mergingBranch === s.branch;
-  }
-
-  private mergingBranch: string | null = null;
-
-  /** Execute the merge of a session's branch into its base (guarded). */
+  /** Merge a session's branch into the integration worktree (main tree untouched). */
   async merge(id: string): Promise<{ ok: boolean; result: any }> {
     const s = this.sessions.get(id);
     if (!s) return { ok: false, result: { status: 'error', reason: 'no such session' } };
-    const result = await g.mergeBranch(s.repo, s.baseBranch, s.branch);
+    const int = await this.ensureIntegration(s.repo, s.baseBranch);
+    if (await g.mergeInProgress(int.path)) {
+      return { ok: false, result: { status: 'refused', reason: 'integration has an unresolved conflict — resolve or abort it first' } };
+    }
+    const result = await g.mergeInWorktree(int.path, s.branch);
     if (result.status === 'conflict') this.mergingBranch = s.branch;
     if (result.status === 'merged') this.mergingBranch = null;
-    // A merge changes the base for every sibling on the same base — recompute all.
+    // Landing a merge advances the integration branch — recompute every sibling.
     await this.refreshAllMergeStatus();
     return { ok: result.status === 'merged' || result.status === 'conflict', result };
   }
 
-  /** Abort an in-progress conflicted merge in a session's repo. */
+  /** Abort an in-progress conflicted merge in the integration worktree. */
   async abortMerge(id: string): Promise<boolean> {
     const s = this.sessions.get(id);
     if (!s) return false;
-    const ok = await g.abortMerge(s.repo);
+    const int = await this.ensureIntegration(s.repo, s.baseBranch);
+    const ok = await g.abortMerge(int.path);
     this.mergingBranch = null;
     await this.refreshAllMergeStatus();
     return ok;
+  }
+
+  /** Fast-forward the real base up to the accumulated integration branch. */
+  async promote(id: string): Promise<{ ok: boolean; result: any }> {
+    const s = this.sessions.get(id);
+    if (!s) return { ok: false, result: { status: 'error', reason: 'no such session' } };
+    const branch = this.intBranchName(s.baseBranch);
+    if (!(await g.refExists(s.repo, branch))) {
+      return { ok: false, result: { status: 'error', reason: 'no integration branch yet' } };
+    }
+    const result = await g.fastForward(s.repo, s.baseBranch, branch);
+    await this.refreshAllMergeStatus();
+    return { ok: result.status === 'merged', result };
+  }
+
+  /** Open the integration worktree (where a conflict lives) in an editor. */
+  async openIntegrationInEditor(id: string): Promise<boolean> {
+    const s = this.sessions.get(id);
+    if (!s) return false;
+    const int = await this.ensureIntegration(s.repo, s.baseBranch);
+    return this.launchEditor(int.path);
   }
 
   /** Dispose the driver and remove the worktree (branch is kept for merging). */

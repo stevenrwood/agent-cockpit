@@ -113,9 +113,13 @@ const server = http.createServer(async (req, res) => {
         const ok = await manager.abortMerge(id);
         return send(res, ok ? 200 : 404, { ok });
       }
-      // "Open the base repo (main tree) in VS Code" — to resolve a conflict.
-      if (method === 'POST' && action === 'open-repo') {
-        const ok = manager.openRepoInEditor(id);
+      if (method === 'POST' && action === 'promote') {
+        const { ok, result } = await manager.promote(id);
+        return send(res, 200, { ok, result });
+      }
+      // Open the integration worktree (where a conflict lives) to resolve it.
+      if (method === 'POST' && action === 'open-integration') {
+        const ok = await manager.openIntegrationInEditor(id);
         return send(res, ok ? 200 : 404, { ok });
       }
       if (method === 'DELETE' && !action) {

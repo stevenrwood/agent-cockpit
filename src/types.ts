@@ -69,9 +69,10 @@ export interface SessionDriver {
 }
 
 export interface MergeStatus {
-  baseBranch: string;
-  ahead: number; // commits on this branch not yet in base
-  behind: number; // commits in base not in this branch
+  baseBranch: string; // the ultimate base this session came off
+  targetBranch: string; // where merges actually land: the integration branch (or base until it exists)
+  ahead: number; // commits on this branch not yet in target
+  behind: number; // commits in target not in this branch
   dirty: boolean; // uncommitted changes in the session worktree
   preview: 'clean' | 'conflict' | 'up-to-date' | 'unknown';
   conflictFiles: string[];

@@ -156,8 +156,13 @@
           });
           el.querySelector('[data-abort-merge]')?.addEventListener('click', () =>
             post(`/api/sessions/${s.id}/abort-merge`, {}));
-          el.querySelector('[data-open-repo]')?.addEventListener('click', () =>
-            post(`/api/sessions/${s.id}/open-repo`, {}));
+          el.querySelector('[data-open-integration]')?.addEventListener('click', () =>
+            post(`/api/sessions/${s.id}/open-integration`, {}));
+          el.querySelector('[data-promote]')?.addEventListener('click', async (e) => {
+            const btn = e.target; btn.disabled = true; btn.textContent = 'promoting…';
+            const r = await post(`/api/sessions/${s.id}/promote`, {}).then((x) => x.json()).catch(() => null);
+            if (r && r.result && r.result.status !== 'merged') alert('Promote failed: ' + (r.result.reason || r.result.status));
+          });
         }
       }
 
@@ -209,22 +214,26 @@
             <span class="meta">merge → ${esc(s.baseBranch)} · not checked</span>
             <button data-refresh-merge>↻ check</button></div></div>`;
         }
-        const canMerge = m.ahead > 0 && m.preview !== 'up-to-date';
+        const canMerge = m.ahead > 0 && m.preview !== 'up-to-date' && m.preview !== 'conflict';
         const files = m.conflictFiles.length
           ? `<div class="files">conflicts: ${m.conflictFiles.map(esc).join(', ')}</div>` : '';
         const conflictActions = (m.preview === 'conflict' || m.merging)
-          ? `<button data-open-repo title="Open base repo to resolve">⧉ Open repo</button>
-             <button class="deny" data-abort-merge>Abort merge</button>` : '';
+          ? `<button data-open-integration title="Open the integration worktree to resolve">⧉ Open integration</button>
+             ${m.merging ? '<button class="deny" data-abort-merge>Abort merge</button>' : ''}` : '';
+        const integrationLive = m.targetBranch !== m.baseBranch;
+        const promote = integrationLive && !m.merging
+          ? `<button data-promote title="Fast-forward ${esc(m.baseBranch)} up to the integration branch">Promote → ${esc(m.baseBranch)}</button>` : '';
         return `<div class="merge${cls}">
           <div class="row between">
-            <span class="meta">merge → ${esc(m.baseBranch)} · ↑${m.ahead} ↓${m.behind}${m.dirty ? ' · ⚠ dirty' : ''}</span>
+            <span class="meta">merge → <b>${esc(m.targetBranch)}</b> · ↑${m.ahead} ↓${m.behind}${m.dirty ? ' · ⚠ dirty' : ''}</span>
             <span class="mbadge ${m.preview}">${m.preview}</span>
           </div>
           ${files}
           <div class="row">
             <button data-refresh-merge>↻</button>
-            ${canMerge ? `<button class="ok" data-merge>Merge → ${esc(m.baseBranch)}</button>` : ''}
+            ${canMerge ? `<button class="ok" data-merge>Merge → ${esc(m.targetBranch)}</button>` : ''}
             ${conflictActions}
+            ${promote}
           </div>
         </div>`;
       }
