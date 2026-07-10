@@ -163,8 +163,9 @@
           <div class="hint" id="permHint">Accept edits: the cockpit auto-approves Edit/Write/MultiEdit/NotebookEdit so you don't approve edits — but still flashes for Bash and other tools.</div>
         </label>
         <label>
-          <span>baseURL (optional — Tier-1 provider swap, e.g. a LiteLLM gateway or local model)</span>
-          <input name="baseURL" placeholder="http://localhost:4000" />
+          <span>baseURL (optional — Tier-1 provider swap; gateways you enter are remembered)</span>
+          <input name="baseURL" list="baseUrlList" placeholder="http://localhost:4000" autocomplete="off" />
+          <datalist id="baseUrlList"></datalist>
         </label>
         <div><button class="primary" type="submit">Spawn session ▸</button></div>
       </form>
@@ -192,7 +193,10 @@
       };
       const modelSel = document.getElementById('modelSel');
       const modelHint = document.getElementById('modelHint');
-      modelSel.addEventListener('change', () => { modelHint.textContent = MODEL_HINTS[modelSel.value] || ''; });
+      modelSel.addEventListener('change', () => {
+        modelHint.textContent = MODEL_HINTS[modelSel.value] || '';
+        localStorage.setItem('cockpit.lastModel', modelSel.value); // persist on change, not just spawn
+      });
 
       const PERM_HINTS = {
         'acceptEdits': "Accept edits: the cockpit auto-approves Edit/Write/MultiEdit/NotebookEdit so you don't approve edits — but still flashes for Bash and other tools.",
@@ -201,7 +205,10 @@
       };
       const permSel = document.getElementById('permSel');
       const permHint = document.getElementById('permHint');
-      permSel.addEventListener('change', () => { permHint.textContent = PERM_HINTS[permSel.value] || ''; });
+      permSel.addEventListener('change', () => {
+        permHint.textContent = PERM_HINTS[permSel.value] || '';
+        localStorage.setItem('cockpit.lastPolicy', permSel.value); // persist on change
+      });
 
       // Restore last-used model + permission policy (persist across browser/server
       // restarts). getItem returns null when absent; '' is a valid saved value (Default model).
@@ -211,6 +218,28 @@
       if (savedPolicy) permSel.value = savedPolicy;
       modelHint.textContent = MODEL_HINTS[modelSel.value] || '';
       permHint.textContent = PERM_HINTS[permSel.value] || '';
+
+      // Repo persists on every keystroke (not just spawn).
+      repoInput.addEventListener('input', () => localStorage.setItem('cockpit.lastRepo', repoInput.value.trim()));
+
+      // baseURL: a remembered dropdown (datalist) — every gateway you enter is kept
+      // and offered next time; free-text entry still allowed.
+      const baseURLInput = document.querySelector('input[name="baseURL"]');
+      const baseUrlList = document.getElementById('baseUrlList');
+      const loadBaseUrls = () => { try { return JSON.parse(localStorage.getItem('cockpit.baseURLs') || '[]'); } catch { return []; } };
+      const renderBaseUrls = () => {
+        baseUrlList.innerHTML = loadBaseUrls().map((u) => `<option value="${esc(u).replace(/"/g, '&quot;')}"></option>`).join('');
+      };
+      const rememberBaseUrl = (url) => {
+        url = (url || '').trim();
+        localStorage.setItem('cockpit.lastBaseURL', url);
+        if (!url) return;
+        const list = loadBaseUrls();
+        if (!list.includes(url)) { list.push(url); localStorage.setItem('cockpit.baseURLs', JSON.stringify(list)); renderBaseUrls(); }
+      };
+      renderBaseUrls();
+      baseURLInput.value = localStorage.getItem('cockpit.lastBaseURL') || '';
+      baseURLInput.addEventListener('change', () => rememberBaseUrl(baseURLInput.value));
 
       function esc(s) { return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
       function post(path, body) {
@@ -373,6 +402,7 @@
         localStorage.setItem('cockpit.lastRepo', repo);
         localStorage.setItem('cockpit.lastModel', f.model.value);
         localStorage.setItem('cockpit.lastPolicy', f.permissionPolicy.value);
+        rememberBaseUrl(f.baseURL.value); // add this gateway to the remembered list
         f.goal.value = '';
       });
 
