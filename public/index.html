@@ -25,13 +25,13 @@
       header .count { color: var(--dim); }
       main { padding: 18px; }
       form.new {
-        display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px;
+        display: flex; flex-direction: column; gap: 16px;
         background: var(--panel); border: 1px solid var(--border);
-        border-radius: 8px; padding: 14px; margin-bottom: 18px;
+        border-radius: 8px; padding: 16px; margin-bottom: 18px;
       }
-      form.new .full { grid-column: 1 / -1; }
-      form.new label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #2b3138; font-weight: 600; }
+      form.new label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #2b3138; font-weight: 600; }
       form.new label .req { color: var(--flash); }
+      form.new label > input, form.new label > select, form.new label > textarea { width: 100%; }
       input, button, textarea, select {
         font: inherit; color: var(--text); background: #fff;
         border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
@@ -39,7 +39,7 @@
       textarea.goal { min-height: 200px; resize: vertical; line-height: 1.5;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
       input::placeholder, textarea::placeholder { color: var(--idle); }
-      .hint { font-size: 12px; color: var(--dim); min-height: 16px; }
+      .hint { font-size: 12px; color: var(--dim); font-weight: 400; }
       button { cursor: pointer; background: var(--panel2); border-color: var(--border); }
       button:hover { filter: brightness(0.97); }
       button.primary { background: var(--accent); color: #fff; border: none; font-weight: 600; padding: 10px 16px; }
@@ -134,7 +134,7 @@
     </header>
     <main>
       <form class="new" id="newForm">
-        <label class="full">
+        <label>
           <span>Goal / instructions <span class="req">*</span> — this is the prompt the session starts with (paste the full brief)</span>
           <textarea class="goal" name="goal" placeholder="e.g. Implement Check-for-updates in Help&gt;Support: query GitHub releases of ioSenderV2/ioSender, compare to running version… (read CLAUDE.md first)" required></textarea>
         </label>
@@ -151,6 +151,7 @@
             <option value="claude-haiku-4-5-20251001">Haiku 4.5 — cheapest/fastest</option>
             <option value="claude-fable-5">Fable 5 — creative/writing</option>
           </select>
+          <div class="hint" id="modelHint">Default: inherits the cockpit's model (Opus 4.8) — best for hard reasoning, big refactors, and design work.</div>
         </label>
         <label>
           <span>Permissions</span>
@@ -159,14 +160,13 @@
             <option value="bypass">Bypass — auto-approve everything</option>
             <option value="ask">Ask — flash for every tool</option>
           </select>
+          <div class="hint" id="permHint">Accept edits: the cockpit auto-approves Edit/Write/MultiEdit/NotebookEdit so you don't approve edits — but still flashes for Bash and other tools.</div>
         </label>
-        <div class="hint full" id="modelHint">Default: inherits the cockpit's model (Opus 4.8) — best for hard reasoning, big refactors, and design work.</div>
-        <div class="hint full" id="permHint">Accept edits: the cockpit auto-approves Edit/Write/MultiEdit/NotebookEdit so you don't approve edits — but still flashes for Bash and other tools.</div>
-        <label class="full">
+        <label>
           <span>baseURL (optional — Tier-1 provider swap, e.g. a LiteLLM gateway or local model)</span>
           <input name="baseURL" placeholder="http://localhost:4000" />
         </label>
-        <div class="full"><button class="primary" type="submit">Spawn session ▸</button></div>
+        <div><button class="primary" type="submit">Spawn session ▸</button></div>
       </form>
       <div class="grid" id="grid"></div>
       <div class="empty" id="empty">No sessions yet. Spawn one above — it gets its own git worktree.</div>
