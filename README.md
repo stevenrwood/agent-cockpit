@@ -109,15 +109,32 @@ base up to the merged result.
 Per-session **⧉ VS Code** button opens that worktree in a new window (`code -n <worktree>`,
 `COCKPIT_EDITOR` overrides) so you can dive in and take over manually.
 
+## Teardown (shipped)
+
+Graceful shutdown removes every cockpit worktree (session + integration) and deletes the
+`worktrees/` directory, while **keeping all branches** (your work and any accumulated
+integration merges survive). Triggered by:
+
+- **⏻ Shutdown** button in the header, or `POST /api/shutdown`
+- Ctrl+C / `SIGINT` / `SIGTERM` in the terminal running the server
+
+A worktree still open in an external editor may resist deletion on Windows (an expected OS
+lock) — the git worktree is unregistered regardless; the empty directory can be removed once
+the editor releases it.
+
+## Context meter
+
+Each card shows a color-coded context meter (green < 70%, amber < 70–90%, red ≥ 90%). The
+window is set immediately from the model on session init and overridden with the SDK's exact
+`modelUsage.contextWindow` on the first result; occupancy is the most recent request's
+input + cache tokens (current context, not cumulative billing), and a compaction (`↺`) drops
+it naturally.
+
 ## Known open work (next slices)
 
 - Tier-2 drivers (native non-Claude agents) — **parked** for now. Tier-1 (route a session to
   a local/OpenAI-compatible model via a gateway using per-session `baseURL`) already works;
   target for a local LLM on Apple Silicon via a LiteLLM Anthropic-passthrough proxy.
-- Context-% is best-effort (last-turn input tokens vs model window); wire a truer measure.
 - Auth/hardening: currently localhost-only, no auth; fine for a single local operator.
 - Repo path must be the OS-native form (e.g. `C:/github/ioSender`), which is what the UI
   form expects — git is invoked with it directly.
-- Integration worktrees are created lazily and kept across the process lifetime; they aren't
-  auto-garbage-collected. Prune with `git worktree remove` + delete `cockpit/int/<base>` when
-  done, or wire a cockpit teardown.

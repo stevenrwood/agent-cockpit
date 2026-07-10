@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ClaudeAgentDriver } from './drivers/claudeAgent.js';
@@ -298,6 +298,41 @@ export class SessionManager {
     if (!s) return false;
     const int = await this.ensureIntegration(s.repo, s.baseBranch);
     return this.launchEditor(int.path);
+  }
+
+  /**
+   * Graceful shutdown: dispose every driver and remove all cockpit worktrees
+   * (session + integration). Branches are KEPT — the work and any accumulated
+   * integration merges survive, so a later run can re-attach or promote.
+   */
+  async teardown(): Promise<void> {
+    const repos = new Set<string>();
+    for (const s of this.sessions.values()) {
+      repos.add(s.repo);
+      try {
+        s.driver.dispose();
+      } catch {
+        /* ignore */
+      }
+      await exec('git', ['-C', s.repo, 'worktree', 'remove', '--force', s.cwd]).catch(() => {});
+    }
+    for (const [key, int] of this.integrations) {
+      const repo = key.split('::')[0];
+      repos.add(repo);
+      await exec('git', ['-C', repo, 'worktree', 'remove', '--force', int.path]).catch(() => {});
+    }
+    for (const repo of repos) {
+      await exec('git', ['-C', repo, 'worktree', 'prune']).catch(() => {});
+    }
+    // Everything under worktrees/ is cockpit-owned and now unregistered from git;
+    // remove the empty directory shells git leaves behind.
+    try {
+      rmSync(WORKTREES_DIR, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    this.sessions.clear();
+    this.integrations.clear();
   }
 
   /** Dispose the driver and remove the worktree (branch is kept for merging). */

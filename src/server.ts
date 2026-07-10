@@ -67,6 +67,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
+    // --- graceful shutdown: teardown worktrees then exit ---
+    if (method === 'POST' && url.pathname === '/api/shutdown') {
+      send(res, 200, { ok: true });
+      setImmediate(() => void shutdown('api'));
+      return;
+    }
+
     // --- create a session ---
     if (method === 'POST' && url.pathname === '/api/sessions') {
       const body = await readBody(req);
@@ -137,3 +144,22 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`agent-cockpit → http://127.0.0.1:${PORT}`);
 });
+
+// Graceful teardown: on Ctrl+C / kill, dispose sessions and remove all cockpit
+// worktrees (branches kept) before exiting.
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} → tearing down worktrees…`);
+  try {
+    await manager.teardown();
+  } catch (err) {
+    console.error('teardown error:', err);
+  }
+  server.close(() => process.exit(0));
+  // Failsafe if server.close hangs on open SSE connections.
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));

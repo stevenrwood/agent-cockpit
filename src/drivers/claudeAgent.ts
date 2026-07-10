@@ -99,7 +99,8 @@ export class ClaudeAgentDriver implements SessionDriver {
         // permissions, so every non-trivial tool routes through canUseTool.
         settingSources: [],
         includePartialMessages: false,
-        canUseTool: (toolName, input) => this.requestPermission(toolName, input),
+        canUseTool: (toolName: string, input: Record<string, unknown>) =>
+          this.requestPermission(toolName, input),
         abortController: this.abort,
       } as any,
     });
@@ -156,11 +157,8 @@ export class ClaudeAgentDriver implements SessionDriver {
     } catch {
       /* ignore */
     }
-    try {
-      this.q?.close?.();
-    } catch {
-      /* ignore */
-    }
+    // The Query object has no public close(); aborting the controller (above)
+    // and closing the input stream tears it down.
     if (this.state.status !== 'error' && this.state.status !== 'interrupted') {
       this.set({ status: 'done', pending: undefined });
     }
@@ -172,7 +170,17 @@ export class ClaudeAgentDriver implements SessionDriver {
       switch (msg.type) {
         case 'system':
           if (msg.subtype === 'init') {
-            this.set({ providerSessionId: msg.session_id, model: msg.model });
+            // Provisional window from the model id so the meter shows on turn 1;
+            // the exact value from modelUsage overrides it on the first result.
+            this.set({
+              providerSessionId: msg.session_id,
+              model: msg.model,
+              contextWindow: this.state.contextWindow ?? windowForModel(msg.model),
+            });
+          } else if (msg.subtype === 'compact_boundary') {
+            // Context was summarized — occupancy drops; the next turn's usage
+            // reflects it. Note it so the operator isn't surprised by the dip.
+            this.set({ lastText: '↺ context compacted' });
           }
           break;
 
@@ -214,6 +222,16 @@ export class ClaudeAgentDriver implements SessionDriver {
       this.set({ status: 'done', pending: undefined });
     }
   }
+}
+
+// Best-known context windows for current models (authoritative value still
+// arrives from the SDK's modelUsage on the first result and overrides this).
+function windowForModel(model?: string): number | undefined {
+  if (!model) return undefined;
+  const m = model.toLowerCase();
+  if (/opus-4-[678]|sonnet-5|sonnet-4-6|fable-5|mythos-5/.test(m)) return 1_000_000;
+  if (/opus-4-5|sonnet-4-5|haiku/.test(m)) return 200_000;
+  return 200_000;
 }
 
 function extractText(content: unknown): string {
