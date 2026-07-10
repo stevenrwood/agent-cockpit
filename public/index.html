@@ -64,6 +64,13 @@
         50% { box-shadow: 0 0 0 4px rgba(207,34,46,0.35); }
       }
       .card h2 { font-size: 14px; margin: 0; font-weight: 600; }
+      .card h2.goal {
+        flex: 1; min-width: 0; cursor: pointer;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .card h2.goal::before { content: "▸ "; color: var(--dim); }
+      .card h2.goal.expanded { white-space: normal; overflow: visible; }
+      .card h2.goal.expanded::before { content: "▾ "; }
       .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .row.between { justify-content: space-between; }
       .badge {
@@ -86,9 +93,12 @@
       .ctx > i.mid { background: var(--warn); }
       .ctx > i.high { background: var(--flash); }
       .preview {
-        background: var(--panel2); border-radius: 6px; padding: 8px 10px;
-        color: var(--text); font-size: 12px; max-height: 78px; overflow: auto; white-space: pre-wrap;
+        background: var(--panel2); border-radius: 6px; padding: 10px 12px;
+        color: var(--text); font-size: 13px; line-height: 1.5;
+        min-height: 220px; max-height: 60vh; overflow: auto; white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
+      .preview .plabel { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
       .perm {
         background: #fff8f7; border: 1px solid var(--flash); border-radius: 8px; padding: 10px;
         display: flex; flex-direction: column; gap: 8px;
@@ -163,6 +173,7 @@
       const grid = document.getElementById('grid');
       const empty = document.getElementById('empty');
       const count = document.getElementById('count');
+      const expandedGoals = new Set(); // survive the full re-render on each SSE tick
 
       // --- form conveniences: remembered repo + model hints ---
       const DEFAULT_REPO = 'c:\\github\\ioSender';
@@ -202,6 +213,10 @@
         for (const s of sessions) {
           const el = document.getElementById('card-' + s.id);
           if (!el) continue;
+          el.querySelector('[data-goal]')?.addEventListener('click', (e) => {
+            e.currentTarget.classList.toggle('expanded');
+            if (expandedGoals.has(s.id)) expandedGoals.delete(s.id); else expandedGoals.add(s.id);
+          });
           el.querySelector('[data-allow]')?.addEventListener('click', () =>
             post(`/api/sessions/${s.id}/permission`, { permissionId: s.pending.id, allow: true }));
           el.querySelector('[data-deny]')?.addEventListener('click', () =>
@@ -254,7 +269,7 @@
              </div>` : '';
         return `<div class="card${flash}" id="card-${s.id}">
           <div class="row between">
-            <h2>${esc(s.goal)}</h2>
+            <h2 class="goal${expandedGoals.has(s.id) ? ' expanded' : ''}" data-goal title="click to expand / collapse the full goal">${esc(s.goal)}</h2>
             <span class="badge ${s.status}">${s.status}</span>
           </div>
           <div class="meta">${esc(s.provider)}${s.model ? ' · ' + esc(s.model) : ''}${s.baseURL ? ' · ⇄ ' + esc(s.baseURL) : ''} · ${esc(s.branch)}</div>
@@ -269,7 +284,7 @@
           </div>
           ${perm}
           ${mergeHtml(s)}
-          ${s.lastText ? `<div class="preview">${esc(s.lastText)}</div>` : ''}
+          <div class="preview"><div class="plabel">latest output</div>${s.lastText ? esc(s.lastText) : '(waiting for output…)'}</div>
           <div class="actions">
             <input data-msg placeholder="send a follow-up message…" style="flex:1" />
             <button data-send>Send</button>
