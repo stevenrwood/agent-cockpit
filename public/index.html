@@ -594,6 +594,7 @@
         const tr = data.transcript || [];
         chatStatus.textContent = st.status || 'idle';
         chatStatus.className = 'badge ' + (st.status || 'idle');
+        chatStatus.title = st.error ? 'error: ' + st.error : ''; // hover the badge for the reason
         document.getElementById('chatTurns').textContent = st.turns ?? 0;
         document.getElementById('chatTok').textContent = fmt(st.inputTokens) + '/' + fmt(st.outputTokens);
         document.getElementById('chatCost').textContent = '$' + (st.costUsd || 0).toFixed(4);

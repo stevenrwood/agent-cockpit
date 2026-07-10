@@ -140,7 +140,11 @@ export class ClaudeAgentDriver implements SessionDriver {
       this.set({ status: 'idle', model: opts.model, permissionPolicy: this.policy });
     }
     this.consume().catch((err) => {
-      this.set({ status: 'error', error: String(err?.message ?? err) });
+      const message = String(err?.message ?? err);
+      // Log it into the transcript too — the status badge alone gives no way
+      // to see WHY a session errored; this makes the reason visible in-line.
+      this.log({ role: 'system', ts: Date.now(), text: `⚠ error: ${message}` });
+      this.set({ status: 'error', error: message });
     });
   }
 
