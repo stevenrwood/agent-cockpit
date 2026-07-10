@@ -100,6 +100,14 @@ const server = http.createServer(async (req, res) => {
         const ok = manager.sendMessage(id, String(body.text ?? ''));
         return send(res, ok ? 200 : 404, { ok });
       }
+      if (method === 'POST' && action === 'policy') {
+        const body = await readBody(req);
+        const policy = body.policy;
+        if (policy !== 'ask' && policy !== 'acceptEdits' && policy !== 'bypass')
+          return send(res, 400, { error: 'policy must be ask | acceptEdits | bypass' });
+        const ok = manager.setPolicy(id, policy);
+        return send(res, ok ? 200 : 404, { ok });
+      }
       if (method === 'POST' && action === 'interrupt') {
         const ok = await manager.interrupt(id);
         return send(res, ok ? 200 : 404, { ok });

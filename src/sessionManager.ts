@@ -127,6 +127,13 @@ export class SessionManager {
     return s.driver.answerPermission(permissionId, decision);
   }
 
+  setPolicy(id: string, policy: 'ask' | 'acceptEdits' | 'bypass'): boolean {
+    const s = this.sessions.get(id);
+    if (!s) return false;
+    s.driver.setPolicy(policy);
+    return true;
+  }
+
   sendMessage(id: string, text: string): boolean {
     const s = this.sessions.get(id);
     if (!s) return false;

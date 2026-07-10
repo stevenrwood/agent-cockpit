@@ -110,7 +110,7 @@ export class ClaudeAgentDriver implements SessionDriver {
     });
 
     this.input.push(opts.goal);
-    this.set({ status: 'running', model: opts.model });
+    this.set({ status: 'running', model: opts.model, permissionPolicy: this.policy });
     this.consume().catch((err) => {
       this.set({ status: 'error', error: String(err?.message ?? err) });
     });
@@ -137,6 +137,19 @@ export class ClaudeAgentDriver implements SessionDriver {
     if (this.policy === 'bypass') return true;
     if (this.policy === 'acceptEdits') return EDIT_TOOLS.has(toolName);
     return false;
+  }
+
+  // Change the permission policy on a LIVE session. Because shouldAutoApprove is
+  // consulted fresh on every canUseTool call, this takes effect immediately for
+  // subsequent tools; and if we're currently blocked on a permission the new
+  // policy would auto-approve, release it now so the operator isn't stuck.
+  setPolicy(policy: 'ask' | 'acceptEdits' | 'bypass'): void {
+    this.policy = policy;
+    const p = this.state.pending;
+    if (p && this.shouldAutoApprove(p.toolName)) {
+      this.answerPermission(p.id, { allow: true });
+    }
+    this.set({ permissionPolicy: policy });
   }
 
   answerPermission(permissionId: string, decision: PermissionDecision): boolean {

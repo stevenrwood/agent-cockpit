@@ -85,6 +85,7 @@
       .badge.starting { background: #fff8c5; color: var(--warn); }
       .badge.error, .badge.interrupted { background: #ffebe9; color: var(--flash); }
       .meta { color: var(--dim); font-size: 12px; }
+      select.cardpolicy { padding: 2px 6px; font-size: 12px; }
       .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
       .stat { background: var(--panel2); border-radius: 6px; padding: 6px 8px; }
       .stat .k { color: var(--dim); font-size: 10px; text-transform: uppercase; }
@@ -215,6 +216,8 @@
         for (const s of sessions) {
           const el = document.getElementById('card-' + s.id);
           if (!el) continue;
+          el.querySelector('[data-policy]')?.addEventListener('change', (e) =>
+            post(`/api/sessions/${s.id}/policy`, { policy: e.target.value }));
           el.querySelector('[data-goal]')?.addEventListener('click', (e) => {
             e.currentTarget.classList.toggle('expanded');
             if (expandedGoals.has(s.id)) expandedGoals.delete(s.id); else expandedGoals.add(s.id);
@@ -275,6 +278,12 @@
             <span class="badge ${s.status}">${s.status}</span>
           </div>
           <div class="meta">${esc(s.provider)}${s.model ? ' · ' + esc(s.model) : ''}${s.baseURL ? ' · ⇄ ' + esc(s.baseURL) : ''} · ${esc(s.branch)}</div>
+          <div class="row"><span class="meta">permissions:</span>
+            <select data-policy class="cardpolicy" title="Change auto-approval for this live session — takes effect immediately">
+              <option value="ask"${s.permissionPolicy === 'ask' ? ' selected' : ''}>Ask (flash all)</option>
+              <option value="acceptEdits"${s.permissionPolicy === 'acceptEdits' ? ' selected' : ''}>Accept edits</option>
+              <option value="bypass"${s.permissionPolicy === 'bypass' ? ' selected' : ''}>Bypass all</option>
+            </select></div>
           <div class="stats">
             <div class="stat"><div class="k">turns</div><div class="v">${s.turns}</div></div>
             <div class="stat"><div class="k">tokens in/out</div><div class="v">${fmt(s.inputTokens)}/${fmt(s.outputTokens)}</div></div>

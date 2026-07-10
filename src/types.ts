@@ -27,6 +27,7 @@ export interface DriverState {
   provider: string;
   model?: string;
   providerSessionId?: string;
+  permissionPolicy?: 'ask' | 'acceptEdits' | 'bypass'; // live, changeable per session
   status: SessionStatus;
   turns: number;
   inputTokens: number;
@@ -72,6 +73,8 @@ export interface SessionDriver {
   start(opts: DriverStartOptions): void;
   sendMessage(text: string): void;
   answerPermission(permissionId: string, decision: PermissionDecision): boolean;
+  /** Change the auto-approval policy on a live session. */
+  setPolicy(policy: 'ask' | 'acceptEdits' | 'bypass'): void;
   interrupt(): Promise<void>;
   /** Close the input stream and tear the session down. */
   dispose(): void;
