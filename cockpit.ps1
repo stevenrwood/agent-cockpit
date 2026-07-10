@@ -53,9 +53,29 @@ function Open-Cockpit {
   Start-Process $edge "--app=$url"
 }
 
+# How many sessions are live right now? A restart kills the server process, so
+# we refuse to do that out from under running work.
+function Get-ActiveSessionCount {
+  try {
+    $r = Invoke-RestMethod -Uri "$url/api/state" -TimeoutSec 2 -ErrorAction Stop
+    return @($r).Count
+  } catch { return 0 }  # server down / unreachable = nothing to protect
+}
+
+function Restart-Cockpit {
+  $active = Get-ActiveSessionCount
+  if ($active -gt 0) {
+    Write-Warning "$active active session(s) - NOT restarting (would kill them). Opening a window instead."
+    Write-Warning "Front-end fixes: just Ctrl+Shift+R. To force a restart, remove the sessions first or run: .\cockpit.ps1 stop"
+    Open-Cockpit
+    return
+  }
+  Stop-Cockpit; Start-Sleep -Milliseconds 500; Start-Cockpit; Open-Cockpit
+}
+
 switch ($Action) {
   'stop'    { Stop-Cockpit }
   'open'    { Open-Cockpit }
-  'restart' { Stop-Cockpit; Start-Sleep -Milliseconds 500; Start-Cockpit; Open-Cockpit }
+  'restart' { Restart-Cockpit }
   'start'   { Start-Cockpit; Open-Cockpit }
 }
