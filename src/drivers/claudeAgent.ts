@@ -1,5 +1,6 @@
 import { query, type Query } from '@anthropic-ai/claude-agent-sdk';
 import type {
+  ChatEntry,
   DriverState,
   DriverStartOptions,
   PermissionDecision,
@@ -71,11 +72,20 @@ export class ClaudeAgentDriver implements SessionDriver {
   private pending = new Map<string, PendingResolver>();
   private policy: 'ask' | 'acceptEdits' | 'bypass' = 'ask';
   private cumOutput = 0; // running sum of output tokens across the session (live)
+  private transcript: ChatEntry[] = [];
 
   constructor(private onChange: () => void) {}
 
   getState(): DriverState {
     return { ...this.state };
+  }
+
+  getTranscript(): ChatEntry[] {
+    return this.transcript;
+  }
+
+  private log(entry: ChatEntry) {
+    this.transcript.push(entry);
   }
 
   private set(patch: Partial<DriverState>) {
@@ -98,6 +108,7 @@ export class ClaudeAgentDriver implements SessionDriver {
         cwd: opts.cwd,
         model: opts.model,
         env,
+        ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
         permissionMode: opts.permissionMode ?? 'default',
         // Load nothing from disk — the cockpit is the source of truth for
         // permissions, so every non-trivial tool routes through canUseTool.
@@ -109,8 +120,19 @@ export class ClaudeAgentDriver implements SessionDriver {
       } as any,
     });
 
-    this.input.push(opts.goal);
-    this.set({ status: 'running', model: opts.model, permissionPolicy: this.policy });
+    if (opts.goal) {
+      this.input.push(opts.goal);
+      this.log({ role: 'user', ts: Date.now(), text: opts.goal });
+      this.set({ status: 'running', model: opts.model, permissionPolicy: this.policy });
+    } else if (opts.primeText) {
+      // Silent priming (post-reset continuity) — not a user turn.
+      this.input.push(opts.primeText);
+      this.log({ role: 'system', ts: Date.now(), text: '↺ new context — carried forward a summary of the conversation so far' });
+      this.set({ status: 'running', model: opts.model, permissionPolicy: this.policy });
+    } else {
+      // Dispatcher boot: stream open, waiting for the first message.
+      this.set({ status: 'idle', model: opts.model, permissionPolicy: this.policy });
+    }
     this.consume().catch((err) => {
       this.set({ status: 'error', error: String(err?.message ?? err) });
     });
@@ -167,6 +189,7 @@ export class ClaudeAgentDriver implements SessionDriver {
 
   sendMessage(text: string): void {
     this.input.push(text);
+    this.log({ role: 'user', ts: Date.now(), text });
     this.set({ status: 'running' });
   }
 
@@ -215,6 +238,10 @@ export class ClaudeAgentDriver implements SessionDriver {
 
         case 'assistant': {
           const text = extractText(msg.message?.content);
+          if (text) this.log({ role: 'assistant', ts: Date.now(), text });
+          for (const t of extractToolUses(msg.message?.content)) {
+            this.log({ role: 'tool', ts: Date.now(), tool: t.tool, toolInput: t.input });
+          }
           const usage = msg.message?.usage;
           // Live telemetry: a `result` only lands at end-of-turn, so update the
           // token/context figures off every assistant message — otherwise a long
@@ -276,6 +303,13 @@ function windowForModel(model?: string): number | undefined {
   if (/opus-4-[678]|sonnet-5|sonnet-4-6|fable-5|mythos-5/.test(m)) return 1_000_000;
   if (/opus-4-5|sonnet-4-5|haiku/.test(m)) return 200_000;
   return 200_000;
+}
+
+function extractToolUses(content: unknown): Array<{ tool: string; input: Record<string, unknown> }> {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter((b: any) => b?.type === 'tool_use' && typeof b.name === 'string')
+    .map((b: any) => ({ tool: b.name as string, input: (b.input ?? {}) as Record<string, unknown> }));
 }
 
 function extractText(content: unknown): string {

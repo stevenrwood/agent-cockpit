@@ -3,15 +3,52 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SessionManager } from './sessionManager.js';
+import { Dispatcher } from './dispatcher.js';
+import { Terminal, normalizeShell } from './terminal.js';
+import { autocorrect } from './autocorrect.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.COCKPIT_PORT ?? 8770);
 const manager = new SessionManager();
 
+// The dispatcher chat + a shared base-repo terminal. Both are singletons that
+// live for the whole cockpit run; the dispatcher is created lazily on first use
+// so a boot with no chat costs nothing.
+let dispatcher: Dispatcher | null = null;
+const chatListeners = new Set<() => void>();
+function getDispatcher(): Dispatcher {
+  if (!dispatcher) dispatcher = new Dispatcher(() => { for (const cb of chatListeners) cb(); });
+  return dispatcher;
+}
+let terminal: Terminal | null = null;
+function getTerminal(): Terminal {
+  if (!terminal) terminal = new Terminal();
+  return terminal;
+}
+
 function send(res: http.ServerResponse, code: number, body: unknown) {
   const json = JSON.stringify(body);
   res.writeHead(code, { 'Content-Type': 'application/json' });
   res.end(json);
+}
+
+// Open an SSE stream and return a non-throwing writer. Writes after the client
+// disconnects are swallowed (they must never bubble into the request handler's
+// catch, which would try to writeHead again on an already-headed response).
+function openSSE(res: http.ServerResponse): (data: unknown) => void {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  return (data: unknown) => {
+    if (res.writableEnded) return;
+    try {
+      res.write(typeof data === 'string' ? data : `data: ${JSON.stringify(data)}\n\n`);
+    } catch {
+      /* client went away mid-write */
+    }
+  };
 }
 
 async function readBody(req: http.IncomingMessage): Promise<any> {
@@ -41,15 +78,11 @@ const server = http.createServer(async (req, res) => {
 
     // --- SSE live state stream ---
     if (method === 'GET' && url.pathname === '/api/events') {
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      });
-      const push = () => res.write(`data: ${JSON.stringify(manager.snapshots())}\n\n`);
+      const write = openSSE(res);
+      const push = () => write(manager.snapshots());
       push();
       const unsub = manager.onChange(push);
-      const ka = setInterval(() => res.write(': keep-alive\n\n'), 15000);
+      const ka = setInterval(() => write(': keep-alive\n\n'), 15000);
       req.on('close', () => {
         clearInterval(ka);
         unsub();
@@ -59,6 +92,58 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && url.pathname === '/api/state') {
       return send(res, 200, manager.snapshots());
+    }
+
+    // --- dispatcher chat ---
+    if (method === 'GET' && url.pathname === '/api/chat/events') {
+      const d = getDispatcher(); // resolve BEFORE opening the stream (may construct)
+      const write = openSSE(res);
+      const push = () => write({ state: d.getState(), transcript: d.getTranscript() });
+      push();
+      chatListeners.add(push);
+      const ka = setInterval(() => write(': keep-alive\n\n'), 15000);
+      req.on('close', () => {
+        clearInterval(ka);
+        chatListeners.delete(push);
+      });
+      return;
+    }
+    if (method === 'POST' && url.pathname === '/api/chat/message') {
+      const body = await readBody(req);
+      getDispatcher().sendMessage(String(body.text ?? ''));
+      return send(res, 200, { ok: true });
+    }
+    if (method === 'POST' && url.pathname === '/api/chat/autocorrect') {
+      const body = await readBody(req);
+      const cleaned = await autocorrect(String(body.text ?? ''));
+      return send(res, 200, { cleaned });
+    }
+    if (method === 'POST' && url.pathname === '/api/chat/reset') {
+      getDispatcher().reset();
+      return send(res, 200, { ok: true });
+    }
+
+    // --- shared base-repo terminal ---
+    if (method === 'GET' && url.pathname === '/api/terminal/events') {
+      const term = getTerminal(); // resolve BEFORE opening the stream (may spawn shell)
+      const write = openSSE(res);
+      const unsub = term.subscribe((chunk) => write({ chunk }));
+      const ka = setInterval(() => write(': keep-alive\n\n'), 15000);
+      req.on('close', () => {
+        clearInterval(ka);
+        unsub();
+      });
+      return;
+    }
+    if (method === 'POST' && url.pathname === '/api/terminal/input') {
+      const body = await readBody(req);
+      getTerminal().write(String(body.data ?? ''));
+      return send(res, 200, { ok: true });
+    }
+    if (method === 'POST' && url.pathname === '/api/terminal/reset') {
+      const body = await readBody(req);
+      getTerminal().reset(body.shell ? normalizeShell(body.shell) : undefined);
+      return send(res, 200, { ok: true, shell: getTerminal().getShell() });
     }
 
     // --- recompute merge status for all sessions ---
@@ -169,6 +254,12 @@ async function shutdown(signal: string) {
   shuttingDown = true;
   console.log(`\n${signal} → tearing down worktrees…`);
   try {
+    dispatcher?.dispose();
+    terminal?.dispose();
+  } catch {
+    /* ignore */
+  }
+  try {
     await manager.teardown();
   } catch (err) {
     console.error('teardown error:', err);
@@ -179,3 +270,8 @@ async function shutdown(signal: string) {
 }
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+// The cockpit hosts LIVE agent sessions — one stray error (e.g. an SSE write
+// racing a client disconnect) must not take them all down. Log and stay up.
+process.on('uncaughtException', (err) => console.error('uncaughtException:', err));
+process.on('unhandledRejection', (err) => console.error('unhandledRejection:', err));

@@ -38,12 +38,14 @@ function Stop-Cockpit {
 function Start-Cockpit {
   if (Get-CockpitPid) { Write-Host "Server already up on :$port"; return }
   Write-Host "Starting server on :$port ..."
-  Start-Process -FilePath 'npm' -ArgumentList 'start' -WorkingDirectory $root -WindowStyle Minimized
-  for ($i = 0; $i -lt 30; $i++) {
+  # Must be npm.cmd, not 'npm' — Start-Process can't resolve the extensionless
+  # shim on Windows and silently fails to launch.
+  Start-Process -FilePath 'npm.cmd' -ArgumentList 'start' -WorkingDirectory $root -WindowStyle Minimized
+  for ($i = 0; $i -lt 45; $i++) {
     Start-Sleep -Milliseconds 400
     if (Get-CockpitPid) { Write-Host "Server up."; return }
   }
-  Write-Warning "Server did not come up within ~12s; check the npm window."
+  Write-Warning "Server did not come up within ~18s; check the npm window."
 }
 
 function Open-Cockpit {

@@ -22,6 +22,15 @@ export interface PendingPermission {
   createdAt: number;
 }
 
+/** One line in a session's conversation log (chat window / future card transcript). */
+export interface ChatEntry {
+  role: 'user' | 'assistant' | 'tool' | 'system';
+  ts: number;
+  text?: string; // user/assistant/system prose
+  tool?: string; // role === 'tool': the tool name
+  toolInput?: Record<string, unknown>; // role === 'tool': its input (compact)
+}
+
 /** Live per-session state a driver exposes to the shell. */
 export interface DriverState {
   provider: string;
@@ -43,11 +52,13 @@ export interface DriverState {
 }
 
 export interface DriverStartOptions {
-  goal: string;
+  goal?: string; // initial user message; omit to open the session idle (chat dispatcher)
+  primeText?: string; // silent priming message (logged as system) — used to seed a post-reset session
   cwd: string; // the git worktree this session works in
   model?: string;
   baseURL?: string; // Tier-1: point the harness at a gateway (LiteLLM/Ollama/...)
   apiKey?: string; // optional per-session key for that gateway
+  systemPrompt?: string; // custom system prompt (dispatcher role); omit to use the default preset
   permissionMode?: 'default' | 'acceptEdits' | 'plan';
   // Cockpit-side auto-approval policy (independent of the SDK permissionMode).
   // canUseTool stays active so the cockpit remains the source of truth; this
@@ -70,6 +81,8 @@ export interface PermissionDecision {
 export interface SessionDriver {
   readonly provider: string;
   getState(): DriverState;
+  /** The full conversation log accumulated so far (chat window). */
+  getTranscript(): ChatEntry[];
   start(opts: DriverStartOptions): void;
   sendMessage(text: string): void;
   answerPermission(permissionId: string, decision: PermissionDecision): boolean;

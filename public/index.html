@@ -9,6 +9,7 @@
         --bg: #f5f6f8; --panel: #ffffff; --panel2: #eef1f4; --border: #d0d7de;
         --text: #1f2328; --dim: #414852; --accent: #0969da; --ok: #1a7f37;
         --warn: #9a6700; --flash: #cf222e; --idle: #6e7781;
+        --claude: #d97757; --claude-d: #c2603f; --claude-soft: rgba(217,119,87,0.16);
       }
       * { box-sizing: border-box; }
       body {
@@ -18,10 +19,11 @@
       code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
       header {
         display: flex; align-items: center; gap: 12px; padding: 12px 18px;
-        border-bottom: 1px solid var(--border); background: var(--panel);
-        position: sticky; top: 0; z-index: 10;
+        border-bottom: 2px solid var(--claude); background: var(--panel);
+        position: sticky; top: 0; z-index: 30;
       }
-      header h1 { font-size: 16px; margin: 0; letter-spacing: 0.5px; }
+      header h1 { font-size: 16px; margin: 0; letter-spacing: 0.5px; color: var(--claude-d); }
+      header h1 .glyph { color: var(--claude); }
       header .count { color: var(--dim); }
       main { padding: 18px; }
       form.new {
@@ -32,17 +34,24 @@
       form.new label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #2b3138; font-weight: 600; }
       form.new label .req { color: var(--flash); }
       form.new label > input, form.new label > select, form.new label > textarea { width: 100%; }
+      textarea.goal { min-height: 200px; resize: vertical; line-height: 1.5;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
       input, button, textarea, select {
         font: inherit; color: var(--text); background: #fff;
         border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
       }
-      textarea.goal { min-height: 200px; resize: vertical; line-height: 1.5;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
       input::placeholder, textarea::placeholder { color: var(--idle); }
       .hint { font-size: 12px; color: var(--dim); font-weight: 400; }
       button { cursor: pointer; background: var(--panel2); border-color: var(--border); }
       button:hover { filter: brightness(0.97); }
-      button.primary { background: var(--accent); color: #fff; border: none; font-weight: 600; padding: 10px 16px; }
+      button.primary { background: var(--claude); color: #fff; border: none; font-weight: 600; padding: 10px 16px; }
+      button.primary:hover { background: var(--claude-d); filter: none; }
+      /* brand action button: ＋ Spawn session */
+      #spawnToggle { background: var(--claude); color: #fff; border: none; font-weight: 600; }
+      #spawnToggle:hover { background: var(--claude-d); filter: none; }
+      input:focus, textarea:focus, select:focus {
+        outline: none; border-color: var(--claude); box-shadow: 0 0 0 3px var(--claude-soft);
+      }
       button.ok { background: var(--ok); color: #fff; border: none; }
       button.deny { background: var(--flash); color: #fff; border: none; }
       button.ghost { background: transparent; }
@@ -55,30 +64,87 @@
       a.btn:hover { filter: brightness(0.97); }
       a.btn.ok { background: var(--ok); color: #fff; border: none; }
       a.btn.deny { background: var(--flash); color: #fff; border: none; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
-      .card {
-        background: var(--panel); border: 1px solid var(--border);
-        border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+
+      /* ---------- dispatcher chat ---------- */
+      .chat {
+        background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+        margin-bottom: 18px; display: flex; flex-direction: column; overflow: hidden;
       }
+      .chat .chathead {
+        display: flex; align-items: center; gap: 10px; padding: 8px 14px; flex-wrap: wrap;
+        border-bottom: 1px solid var(--border); background: var(--panel2); font-size: 12px; color: var(--dim);
+      }
+      .chat .chathead > b { color: var(--claude-d); letter-spacing: 0.3px; }
+      .chat .chathead .cstat b { color: var(--text); font-weight: 600; }
+      .chat { border-color: var(--claude); }
+      .chat .chathead { background: linear-gradient(0deg, var(--panel2), var(--claude-soft)); }
+      .chat .chathead .ctxwrap { flex: 1; min-width: 180px; max-width: 300px; margin-left: auto; }
+      .chatlog { padding: 14px; display: flex; flex-direction: column; gap: 10px;
+        min-height: 180px; max-height: 46vh; overflow: auto; }
+      .msg { max-width: 82%; padding: 8px 12px; border-radius: 10px; white-space: pre-wrap;
+        line-height: 1.5; word-wrap: break-word; }
+      .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+      .msg.asst { align-self: flex-start; background: var(--panel2); color: var(--text); border-bottom-left-radius: 3px; }
+      .msg.tool { align-self: flex-start; background: transparent; color: var(--dim); font-size: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 2px 6px; max-width: 100%; }
+      .msg.sys { align-self: center; color: var(--warn); font-size: 12px; font-style: italic; background: transparent; }
+      .chatinput { border-top: 1px solid var(--border); padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+      .chatinput .rowin { display: flex; gap: 8px; align-items: flex-end; }
+      .chatinput textarea { flex: 1; min-height: 60px; max-height: 40vh; resize: vertical; line-height: 1.5; }
+      .sendbtn { font-size: 18px; padding: 0 16px; height: 44px; min-width: 56px; border-radius: 8px;
+        background: var(--claude); color: #fff; border: none; font-weight: 700; }
+      .sendbtn:hover { background: var(--claude-d); filter: none; }
+      .sendbtn.cleaned { background: var(--ok); color: #fff; border: none; } /* green = ready to send */
+      .sendbtn.cleaned:hover { filter: brightness(0.95); background: var(--ok); }
+      .chatinput .chatHint { min-height: 16px; }
+      .chatempty { color: var(--dim); text-align: center; padding: 24px; }
+
+      /* ---------- flyout terminal ---------- */
+      .term {
+        position: fixed; top: 0; right: 0; height: 100vh; width: min(560px, 92vw);
+        background: #0b0f14; color: #d7dde3; border-left: 1px solid var(--border);
+        display: flex; flex-direction: column; z-index: 40; box-shadow: -8px 0 24px rgba(0,0,0,0.25);
+        transform: translateX(100%); transition: transform 0.18s ease;
+      }
+      .term.open { transform: translateX(0); }
+      .term .termhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+        background: #11161d; border-bottom: 1px solid #222b35; font-size: 12px; color: #9aa7b4; }
+      .term .termhead b { color: #d7dde3; }
+      .term .termhead button { background: #1b232d; color: #d7dde3; border: 1px solid #2b3641; font-size: 12px; padding: 4px 8px; }
+      /* scroll wrapper fills the panel; the <pre> is pushed to the BOTTOM via
+         margin-top:auto so short output sits just above the input (no dead gap),
+         and still scrolls normally once it overflows. */
+      .termbody { flex: 1; overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; }
+      .termout { margin: 0; margin-top: auto; white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.45; }
+      .termin { display: flex; align-items: center; border-top: 1px solid #222b35; background: #0b0f14; }
+      .termin .prompt { color: var(--claude); padding-left: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; }
+      .term.typing .termin { box-shadow: inset 0 0 0 1px var(--claude); }
+      .term.typing .termin .prompt { color: var(--ok); } /* green ❯ = terminal has focus */
+      .termin input { flex: 1; background: #0b0f14; color: #d7dde3; border: none; border-radius: 0;
+        caret-color: var(--claude);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 10px 12px; }
+      .termin input:focus { outline: none; box-shadow: none; }
+
+      /* ---------- session cards (unchanged) ---------- */
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+      .card { background: var(--panel); border: 1px solid var(--border);
+        border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
       .card.flash { border-color: var(--flash); animation: flash 1s ease-in-out infinite; }
       @keyframes flash {
         0%, 100% { box-shadow: 0 0 0 0 rgba(207,34,46,0.0); }
         50% { box-shadow: 0 0 0 4px rgba(207,34,46,0.35); }
       }
       .card h2 { font-size: 14px; margin: 0; font-weight: 600; }
-      .card h2.goal {
-        flex: 1; min-width: 0; cursor: pointer;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      }
+      .card h2.goal { flex: 1; min-width: 0; cursor: pointer;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .card h2.goal::before { content: "▸ "; color: var(--dim); }
       .card h2.goal.expanded { white-space: normal; overflow: visible; }
       .card h2.goal.expanded::before { content: "▾ "; }
       .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .row.between { justify-content: space-between; }
-      .badge {
-        font-size: 11px; padding: 2px 8px; border-radius: 20px; text-transform: uppercase;
-        letter-spacing: 0.5px; font-weight: 700;
-      }
+      .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; text-transform: uppercase;
+        letter-spacing: 0.5px; font-weight: 700; }
       .badge.running { background: #dafbe1; color: var(--ok); }
       .badge.awaiting-input { background: #ffebe9; color: var(--flash); }
       .badge.idle, .badge.done { background: #eef1f4; color: var(--dim); }
@@ -95,26 +161,19 @@
       .ctx > i.low { background: var(--ok); }
       .ctx > i.mid { background: var(--warn); }
       .ctx > i.high { background: var(--flash); }
-      .preview {
-        background: var(--panel2); border-radius: 6px; padding: 10px 12px;
+      .preview { background: var(--panel2); border-radius: 6px; padding: 10px 12px;
         color: var(--text); font-size: 13px; line-height: 1.5;
         min-height: 220px; max-height: 60vh; overflow: auto; white-space: pre-wrap;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      }
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
       .preview .plabel { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
-      .perm {
-        background: #fff8f7; border: 1px solid var(--flash); border-radius: 8px; padding: 10px;
-        display: flex; flex-direction: column; gap: 8px;
-      }
+      .perm { background: #fff8f7; border: 1px solid var(--flash); border-radius: 8px; padding: 10px;
+        display: flex; flex-direction: column; gap: 8px; }
       .perm .tool { color: var(--flash); font-weight: 700; }
       .perm pre { margin: 0; font-size: 11px; color: var(--text); white-space: pre-wrap; max-height: 120px; overflow: auto; }
       .actions { display: flex; gap: 6px; flex-wrap: wrap; }
       .empty { color: var(--dim); text-align: center; padding: 40px; }
-      details summary { cursor: pointer; color: var(--dim); font-size: 12px; }
-      .merge {
-        background: var(--panel2); border: 1px solid var(--border);
-        border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
-      }
+      .merge { background: var(--panel2); border: 1px solid var(--border);
+        border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
       .merge.conflict { border-color: var(--warn); }
       .mbadge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; text-transform: uppercase; }
       .mbadge.clean { background: #dafbe1; color: var(--ok); }
@@ -127,13 +186,16 @@
   </head>
   <body>
     <header>
-      <h1>⌁ AGENT COCKPIT</h1>
+      <h1><span class="glyph">⌁</span> AGENT COCKPIT</h1>
       <span class="count" id="count">0 sessions</span>
+      <button id="spawnToggle">＋ Spawn session</button>
       <button class="ghost" id="refreshMerge" style="margin-left:auto">↻ Check all merges</button>
+      <button class="ghost" id="termToggle" title="Toggle terminal (Ctrl+`)">▸_ Terminal</button>
       <button class="ghost" id="shutdown" title="Tear down all cockpit worktrees (branches kept) and stop the server">⏻ Shutdown</button>
     </header>
     <main>
-      <form class="new" id="newForm">
+      <!-- Spawn form: hidden by default, dropped down by the Spawn button -->
+      <form class="new" id="newForm" style="display:none">
         <label>
           <span>Goal / instructions <span class="req">*</span> — this is the prompt the session starts with (paste the full brief)</span>
           <textarea class="goal" name="goal" placeholder="e.g. Implement Check-for-updates in Help&gt;Support: query GitHub releases of ioSenderV2/ioSender, compare to running version… (read CLAUDE.md first)" required></textarea>
@@ -167,11 +229,60 @@
           <input name="baseURL" list="baseUrlList" placeholder="http://localhost:4000" autocomplete="off" />
           <datalist id="baseUrlList"></datalist>
         </label>
-        <div><button class="primary" type="submit">Spawn session ▸</button></div>
+        <div class="row">
+          <button class="primary" type="submit">Spawn session ▸</button>
+          <button type="button" class="ghost" id="spawnCancel">Cancel</button>
+        </div>
       </form>
+
+      <!-- Dispatcher chat: the default top area -->
+      <section class="chat" id="chat">
+        <div class="chathead">
+          <b>Dispatcher</b>
+          <span id="chatStatus" class="badge idle">idle</span>
+          <span class="cstat">turns <b id="chatTurns">0</b></span>
+          <span class="cstat">tok <b id="chatTok">0/0</b></span>
+          <span class="cstat">cost <b id="chatCost">$0.0000</b></span>
+          <span class="cstat" id="chatModel"></span>
+          <div class="ctxwrap">
+            <div class="meta" id="chatCtxLabel">context —</div>
+            <div class="ctx"><i id="chatCtxBar" class="low" style="width:0%"></i></div>
+          </div>
+          <button class="ghost" id="chatReset" title="New chat — recycle the dispatcher's context (transcript kept)" style="font-size:12px">↺ New chat</button>
+        </div>
+        <div class="chatlog" id="chatlog">
+          <div class="chatempty">Chat with the dispatcher — plan work, then hit ＋ Spawn to delegate it.</div>
+        </div>
+        <div class="chatinput">
+          <div class="rowin">
+            <textarea id="chatText" placeholder="Talk to the dispatcher…  (Ctrl+Enter = clean-then-send · double-click ↑ = send as-is)"></textarea>
+            <button class="sendbtn" id="chatSend" title="Click: clean up typos ✦  ·  Double-click: send as-is">✦↑</button>
+          </div>
+          <div class="hint chatHint" id="chatHint">Click ↑ to auto-fix typos first (then ↑ again to send). Double-click ↑ to send as typed.</div>
+        </div>
+      </section>
+
       <div class="grid" id="grid"></div>
-      <div class="empty" id="empty">No sessions yet. Spawn one above — it gets its own git worktree.</div>
+      <div class="empty" id="empty">No worker sessions yet. Use ＋ Spawn session — each gets its own git worktree.</div>
     </main>
+
+    <!-- Flyout terminal -->
+    <aside class="term" id="termPanel">
+      <div class="termhead">
+        <b>Terminal</b>
+        <select id="termShell" title="Pick your shell (restarts it)">
+          <option value="cmd">cmd</option>
+          <option value="bash">bash</option>
+          <option value="powershell">powershell</option>
+        </select>
+        <span id="termCwd">· base repo</span>
+        <button id="termClear" style="margin-left:auto">clear-scroll</button>
+        <button id="termReset">↺ restart</button>
+        <button id="termClose">✕</button>
+      </div>
+      <div class="termbody" id="termBody"><pre class="termout" id="termOut"></pre></div>
+      <div class="termin"><span class="prompt">❯</span><input id="termIn" placeholder="type a command + Enter…  (runs in the base repo)" autocomplete="off" /></div>
+    </aside>
 
     <script>
       const grid = document.getElementById('grid');
@@ -179,7 +290,28 @@
       const count = document.getElementById('count');
       const expandedGoals = new Set(); // survive the full re-render on each SSE tick
 
-      // --- form conveniences: remembered repo + model hints ---
+      function esc(s) { return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+      function post(path, body) {
+        return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+      }
+      function fmt(n) {
+        if (n == null) return '—';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+        return String(n);
+      }
+
+      /* ================= SPAWN FORM (dropdown) ================= */
+      const newForm = document.getElementById('newForm');
+      const chat = document.getElementById('chat');
+      const spawnToggle = document.getElementById('spawnToggle');
+      function showForm(on) {
+        newForm.style.display = on ? 'flex' : 'none';
+        chat.style.display = on ? 'none' : 'flex';
+        if (on) newForm.querySelector('textarea[name="goal"]').focus();
+      }
+      spawnToggle.addEventListener('click', () => showForm(newForm.style.display === 'none'));
+      document.getElementById('spawnCancel').addEventListener('click', () => showForm(false));
+
       const DEFAULT_REPO = 'c:\\github\\ioSender';
       const repoInput = document.querySelector('input[name="repo"]');
       repoInput.value = localStorage.getItem('cockpit.lastRepo') || DEFAULT_REPO;
@@ -195,7 +327,7 @@
       const modelHint = document.getElementById('modelHint');
       modelSel.addEventListener('change', () => {
         modelHint.textContent = MODEL_HINTS[modelSel.value] || '';
-        localStorage.setItem('cockpit.lastModel', modelSel.value); // persist on change, not just spawn
+        localStorage.setItem('cockpit.lastModel', modelSel.value);
       });
 
       const PERM_HINTS = {
@@ -207,11 +339,9 @@
       const permHint = document.getElementById('permHint');
       permSel.addEventListener('change', () => {
         permHint.textContent = PERM_HINTS[permSel.value] || '';
-        localStorage.setItem('cockpit.lastPolicy', permSel.value); // persist on change
+        localStorage.setItem('cockpit.lastPolicy', permSel.value);
       });
 
-      // Restore last-used model + permission policy (persist across browser/server
-      // restarts). getItem returns null when absent; '' is a valid saved value (Default model).
       const savedModel = localStorage.getItem('cockpit.lastModel');
       if (savedModel !== null) modelSel.value = savedModel;
       const savedPolicy = localStorage.getItem('cockpit.lastPolicy');
@@ -219,11 +349,8 @@
       modelHint.textContent = MODEL_HINTS[modelSel.value] || '';
       permHint.textContent = PERM_HINTS[permSel.value] || '';
 
-      // Repo persists on every keystroke (not just spawn).
       repoInput.addEventListener('input', () => localStorage.setItem('cockpit.lastRepo', repoInput.value.trim()));
 
-      // baseURL: a remembered dropdown (datalist) — every gateway you enter is kept
-      // and offered next time; free-text entry still allowed.
       const baseURLInput = document.querySelector('input[name="baseURL"]');
       const baseUrlList = document.getElementById('baseUrlList');
       const loadBaseUrls = () => { try { return JSON.parse(localStorage.getItem('cockpit.baseURLs') || '[]'); } catch { return []; } };
@@ -241,16 +368,259 @@
       baseURLInput.value = localStorage.getItem('cockpit.lastBaseURL') || '';
       baseURLInput.addEventListener('change', () => rememberBaseUrl(baseURLInput.value));
 
-      function esc(s) { return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
-      function post(path, body) {
-        return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+      newForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = e.target;
+        const repo = f.repo.value.trim();
+        const body = {
+          goal: f.goal.value.trim(),
+          repo,
+          model: f.model.value.trim() || undefined,
+          baseURL: f.baseURL.value.trim() || undefined,
+          permissionPolicy: f.permissionPolicy.value || undefined,
+        };
+        const r = await post('/api/sessions', body);
+        if (!r.ok) { const err = await r.json().catch(() => ({})); alert('Failed: ' + (err.error || r.status)); return; }
+        localStorage.setItem('cockpit.lastRepo', repo);
+        localStorage.setItem('cockpit.lastModel', f.model.value);
+        localStorage.setItem('cockpit.lastPolicy', f.permissionPolicy.value);
+        rememberBaseUrl(f.baseURL.value);
+        f.goal.value = '';
+        showForm(false); // collapse the dropdown; chat comes back
+      });
+
+      /* ================= DISPATCHER CHAT ================= */
+      const chatlog = document.getElementById('chatlog');
+      const chatText = document.getElementById('chatText');
+      const chatSend = document.getElementById('chatSend');
+      const chatHint = document.getElementById('chatHint');
+      const chatStatus = document.getElementById('chatStatus');
+      let chatPhase = 'fresh'; // 'fresh' = needs cleaning · 'cleaned' = ready to send
+      let cleaning = false;
+
+      function setPhase(p) {
+        chatPhase = p;
+        if (p === 'cleaned') {
+          chatSend.textContent = '↑';
+          chatSend.classList.add('cleaned');
+          chatSend.title = 'Click: send ↑  ·  (edit to re-clean, double-click to send as-is)';
+          chatHint.textContent = '✦ cleaned — press ↑ to send. Edit to re-clean; double-click ↑ to send as-is.';
+        } else {
+          chatSend.textContent = '✦↑';
+          chatSend.classList.remove('cleaned');
+          chatSend.title = 'Click: clean up typos ✦  ·  Double-click: send as-is';
+          chatHint.textContent = 'Click ↑ to auto-fix typos first (then ↑ again to send). Double-click ↑ to send as typed.';
+        }
       }
 
+      async function doClean() {
+        const text = chatText.value.trim();
+        if (!text || cleaning) return;
+        cleaning = true;
+        chatSend.disabled = true;
+        chatHint.textContent = '✦ cleaning up…';
+        try {
+          const r = await post('/api/chat/autocorrect', { text }).then((x) => x.json());
+          if (r && typeof r.cleaned === 'string') {
+            chatText.value = r.cleaned;
+            chatText.setSelectionRange(r.cleaned.length, r.cleaned.length);
+          }
+          setPhase('cleaned');
+        } catch { setPhase('cleaned'); }
+        finally { cleaning = false; chatSend.disabled = false; chatText.focus(); }
+      }
+
+      function doSend() {
+        const text = chatText.value.trim();
+        if (!text) return;
+        post('/api/chat/message', { text });
+        chatText.value = '';
+        setPhase('fresh');
+      }
+
+      function onSinglePress() {
+        if (chatPhase === 'fresh') doClean();
+        else doSend();
+      }
+
+      // Distinguish single vs double click on the send button.
+      let clickTimer = null;
+      chatSend.addEventListener('click', () => {
+        if (clickTimer) return; // the dblclick handler will fire
+        clickTimer = setTimeout(() => { clickTimer = null; onSinglePress(); }, 220);
+      });
+      chatSend.addEventListener('dblclick', () => {
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+        doSend(); // send as-is, skip cleaning
+      });
+      // Editing after a clean reverts to 'fresh' so a single ↑ cleans the edit again
+      // (double-click still sends as-is). Plain Enter inserts a newline; Ctrl+Enter = single-press.
+      chatText.addEventListener('input', () => { if (chatPhase === 'cleaned') setPhase('fresh'); });
+      chatText.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSinglePress(); }
+      });
+      document.getElementById('chatReset').addEventListener('click', () => {
+        if (confirm('Recycle the dispatcher context? The transcript stays; the model starts fresh.')) post('/api/chat/reset', {});
+      });
+
+      function chatMsgHtml(e) {
+        if (e.role === 'user') return `<div class="msg user">${esc(e.text)}</div>`;
+        if (e.role === 'assistant') return `<div class="msg asst">${esc(e.text)}</div>`;
+        if (e.role === 'system') return `<div class="msg sys">${esc(e.text)}</div>`;
+        if (e.role === 'tool') {
+          const inp = e.toolInput ? ' ' + esc(compactInput(e.toolInput)) : '';
+          return `<div class="msg tool">⚙ ${esc(e.tool)}${inp}</div>`;
+        }
+        return '';
+      }
+      function compactInput(o) {
+        try {
+          const s = JSON.stringify(o);
+          return s.length > 120 ? s.slice(0, 120) + '…' : s;
+        } catch { return ''; }
+      }
+
+      function renderChat(data) {
+        const st = data.state || {};
+        const tr = data.transcript || [];
+        chatStatus.textContent = st.status || 'idle';
+        chatStatus.className = 'badge ' + (st.status || 'idle');
+        document.getElementById('chatTurns').textContent = st.turns ?? 0;
+        document.getElementById('chatTok').textContent = fmt(st.inputTokens) + '/' + fmt(st.outputTokens);
+        document.getElementById('chatCost').textContent = '$' + (st.costUsd || 0).toFixed(4);
+        document.getElementById('chatModel').textContent = st.model ? '· ' + st.model : '';
+        const win = st.contextWindow, used = st.contextUsed;
+        const bar = document.getElementById('chatCtxBar');
+        const label = document.getElementById('chatCtxLabel');
+        if (win && used) {
+          const pct = Math.min(100, Math.round((used / win) * 100));
+          bar.style.width = pct + '%';
+          bar.className = pct >= 90 ? 'high' : pct >= 70 ? 'mid' : 'low';
+          label.textContent = `context ${fmt(used)} / ${fmt(win)} (${pct}%)`;
+        } else {
+          bar.style.width = '0%'; label.textContent = 'context —';
+        }
+        const nearBottom = chatlog.scrollHeight - chatlog.scrollTop - chatlog.clientHeight < 80;
+        chatlog.innerHTML = tr.length
+          ? tr.map(chatMsgHtml).join('')
+          : '<div class="chatempty">Chat with the dispatcher — plan work, then hit ＋ Spawn to delegate it.</div>';
+        if (nearBottom) chatlog.scrollTop = chatlog.scrollHeight;
+      }
+
+      const chatEv = new EventSource('/api/chat/events');
+      chatEv.onmessage = (m) => { try { renderChat(JSON.parse(m.data)); } catch {} };
+      chatEv.onerror = () => {};
+      setPhase('fresh');
+
+      /* ================= FLYOUT TERMINAL ================= */
+      const termPanel = document.getElementById('termPanel');
+      const termOut = document.getElementById('termOut');
+      const termBody = document.getElementById('termBody');
+      const termIn = document.getElementById('termIn');
+      const termShell = document.getElementById('termShell');
+      let termEv = null, termStarted = false;
+      // Remember the operator's shell choice; default cmd (no PowerShell required).
+      termShell.value = localStorage.getItem('cockpit.shell') || 'cmd';
+      function connectTerm() {
+        if (termEv) return;
+        termEv = new EventSource('/api/terminal/events');
+        termEv.onmessage = (m) => {
+          try {
+            const { chunk } = JSON.parse(m.data);
+            if (chunk == null) return;
+            const near = termBody.scrollHeight - termBody.scrollTop - termBody.clientHeight < 80;
+            termOut.textContent += chunk;
+            if (near) termBody.scrollTop = termBody.scrollHeight;
+          } catch {}
+        };
+        termEv.onerror = () => {};
+      }
+      function openTerm(on) {
+        const show = on ?? !termPanel.classList.contains('open');
+        termPanel.classList.toggle('open', show);
+        if (show) {
+          connectTerm();
+          // On first open, if the saved shell isn't the server default (cmd), switch to it.
+          if (!termStarted) {
+            termStarted = true;
+            if (termShell.value !== 'cmd') { termOut.textContent = ''; post('/api/terminal/reset', { shell: termShell.value }); }
+          }
+          // Focus AFTER the slide-in transform settles (Edge drops focus mid-transition).
+          setTimeout(() => termIn.focus(), 220);
+        }
+      }
+      document.getElementById('termToggle').addEventListener('click', () => openTerm());
+      document.getElementById('termClose').addEventListener('click', () => openTerm(false));
+      document.getElementById('termReset').addEventListener('click', () => { termOut.textContent = ''; post('/api/terminal/reset', { shell: termShell.value }); });
+      document.getElementById('termClear').addEventListener('click', () => { termOut.textContent = ''; });
+      termShell.addEventListener('change', () => {
+        localStorage.setItem('cockpit.shell', termShell.value);
+        termOut.textContent = '';
+        connectTerm();
+        post('/api/terminal/reset', { shell: termShell.value });
+      });
+      // Command history (up/down recall). termHistIdx === termHist.length means
+      // "at the live draft" (past the newest entry).
+      let termHist = [], termHistIdx = 0, termDraft = '';
+      function termSend() {
+        const cmd = termIn.value;
+        post('/api/terminal/input', { data: cmd }); // the shell echoes it back
+        if (cmd.trim() && termHist[termHist.length - 1] !== cmd) termHist.push(cmd);
+        termHistIdx = termHist.length; // reset to the live draft slot
+        termDraft = '';
+        termIn.value = '';
+      }
+      function histNav(dir) {
+        if (!termHist.length) return;
+        if (termHistIdx === termHist.length) termDraft = termIn.value; // stash the in-progress line
+        termHistIdx = Math.max(0, Math.min(termHist.length, termHistIdx + dir));
+        const v = termHistIdx === termHist.length ? termDraft : termHist[termHistIdx];
+        termIn.value = v;
+        setTimeout(() => termIn.setSelectionRange(v.length, v.length), 0); // caret to end
+      }
+      // Native path when the input itself has focus.
+      termIn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); termSend(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); histNav(-1); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); histNav(1); }
+      });
+      // Visible focus feedback (the ❯ turns green while the input is live).
+      termIn.addEventListener('focus', () => termPanel.classList.add('typing'));
+      termIn.addEventListener('blur', () => termPanel.classList.remove('typing'));
+      // Clicking anywhere in the panel (not the header controls, not while
+      // selecting output text) drops focus into the input.
+      termPanel.addEventListener('mouseup', (e) => {
+        if (e.target.closest('.termhead')) return;
+        if (window.getSelection && String(window.getSelection())) return;
+        setTimeout(() => termIn.focus(), 0);
+      });
+      // BULLETPROOF capture: while the terminal is open, route keystrokes into the
+      // line manually — even if native focus didn't land on the input (Edge can drop
+      // focus when the panel is mid slide-in). Skips the chat/other fields.
+      document.addEventListener('keydown', (e) => {
+        if (!termPanel.classList.contains('open')) return;
+        const t = e.target;
+        if (t === termIn) return; // native handler above already covers this
+        const tag = (t.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') return; // typing in chat/form
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (e.key === 'Enter') { e.preventDefault(); termIn.focus(); termSend(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); termIn.focus(); histNav(-1); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); termIn.focus(); histNav(1); }
+        else if (e.key === 'Backspace') { e.preventDefault(); termIn.focus(); termIn.value = termIn.value.slice(0, -1); }
+        else if (e.key.length === 1) { e.preventDefault(); termIn.focus(); termIn.value += e.key; }
+      });
+      // Ctrl+` toggles the terminal; Escape closes it.
+      document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && (e.key === '`' || e.code === 'Backquote')) { e.preventDefault(); openTerm(); }
+        else if (e.key === 'Escape' && termPanel.classList.contains('open')) { e.preventDefault(); openTerm(false); }
+      });
+
+      /* ================= SESSION CARDS ================= */
       function render(sessions) {
         count.textContent = sessions.length + ' session' + (sessions.length === 1 ? '' : 's');
         empty.style.display = sessions.length ? 'none' : 'block';
         grid.innerHTML = sessions.map(cardHtml).join('');
-        // wire buttons
         for (const s of sessions) {
           const el = document.getElementById('card-' + s.id);
           if (!el) continue;
@@ -379,46 +749,16 @@
         </div>`;
       }
 
-      function fmt(n) {
-        if (n == null) return '—';
-        if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-        return String(n);
-      }
-
-      document.getElementById('newForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const f = e.target;
-        const repo = f.repo.value.trim();
-        const body = {
-          goal: f.goal.value.trim(),
-          repo,
-          model: f.model.value.trim() || undefined,
-          baseURL: f.baseURL.value.trim() || undefined,
-          permissionPolicy: f.permissionPolicy.value || undefined,
-        };
-        const r = await post('/api/sessions', body);
-        if (!r.ok) { const err = await r.json().catch(() => ({})); alert('Failed: ' + (err.error || r.status)); return; }
-        // remember repo + dropdown choices for next spawn (survives restarts)
-        localStorage.setItem('cockpit.lastRepo', repo);
-        localStorage.setItem('cockpit.lastModel', f.model.value);
-        localStorage.setItem('cockpit.lastPolicy', f.permissionPolicy.value);
-        rememberBaseUrl(f.baseURL.value); // add this gateway to the remembered list
-        f.goal.value = '';
-      });
-
-      document.getElementById('refreshMerge').addEventListener('click', () =>
-        post('/api/refresh-merge', {}));
-
+      document.getElementById('refreshMerge').addEventListener('click', () => post('/api/refresh-merge', {}));
       document.getElementById('shutdown').addEventListener('click', async () => {
         if (!confirm('Tear down all cockpit worktrees (branches are kept) and stop the server?')) return;
         await post('/api/shutdown', {}).catch(() => {});
         document.body.innerHTML = '<p style="padding:40px;color:#57606a">Cockpit shut down. Worktrees removed; branches kept.</p>';
       });
 
-      // Live updates via SSE.
       const ev = new EventSource('/api/events');
       ev.onmessage = (m) => render(JSON.parse(m.data));
-      ev.onerror = () => { /* browser auto-reconnects */ };
+      ev.onerror = () => {};
     </script>
   </body>
 </html>
