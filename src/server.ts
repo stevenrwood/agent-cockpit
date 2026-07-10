@@ -6,6 +6,7 @@ import { SessionManager } from './sessionManager.js';
 import { Dispatcher } from './dispatcher.js';
 import { Terminal, normalizeShell } from './terminal.js';
 import { autocorrect } from './autocorrect.js';
+import { renderHelp } from './helpPage.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.COCKPIT_PORT ?? 8770);
@@ -73,6 +74,13 @@ const server = http.createServer(async (req, res) => {
       const html = readFileSync(path.resolve(here, '..', 'public', 'index.html'));
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
+      return;
+    }
+
+    // --- help / manual page ---
+    if (method === 'GET' && (url.pathname === '/help' || url.pathname === '/help.html')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(renderHelp());
       return;
     }
 

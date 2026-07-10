@@ -1,10 +1,11 @@
 # Agent Cockpit
 
 Mission control for running **parallel Claude Code sessions** you can actually see and
-steer. Claude acts as a dispatcher — you spawn work sessions, each isolated in its own
-**git worktree**, and the cockpit shows a live card per session with token/cost/context
-telemetry that **flashes red when a session needs your input** (a tool-permission gate),
-so running many agents is manageable instead of a blur.
+steer. You converse with a **dispatcher chat** to plan the work, spawn worker sessions
+that each run isolated in their own **git worktree**, and watch a live card per session
+with token/cost/context telemetry that **flashes red when one needs your input** (a
+tool-permission gate) — so running many agents is manageable instead of a blur. A
+flyout **terminal** is a keystroke away (Ctrl+`) for the occasional manual command.
 
 This is idea #3 of a three-part arc (after the WPF UI test server and the behavioral
 log-mining). Both prerequisites are in place; this makes parallelism tolerable.
@@ -56,9 +57,51 @@ npm install
 npm start                 # → http://127.0.0.1:8770   (COCKPIT_PORT to change)
 ```
 
-Open the URL, then **Spawn session** with a goal and a repo path (e.g.
-`c:\github\ioSender`). The session gets its own worktree; watch the card. When it flashes,
-click **Allow** / **Deny**.
+The top area is the **dispatcher chat** (see below). Hit **＋ Spawn session** to drop the
+spawn form, give a goal and a repo path (e.g. `c:\github\ioSender`); the session gets its
+own worktree and appears as a card below. When a card flashes, click **Allow** / **Deny**.
+
+## Dispatcher chat
+
+The default top area is a persistent conversational **dispatcher** session you talk to —
+your mission-control brain (`src/dispatcher.ts`). It runs in the base repo (no worktree),
+scoped by a custom system prompt to **plan, decompose, and track** work: it drafts crisp
+briefs you paste into **＋ Spawn session**, but it does **not** spawn or drive workers
+itself (conversational-only by design). Its header shows the same telemetry as worker
+cards (status, turns, tokens, cost, model, context meter).
+
+- **One logical permanent session** that **auto-recycles its model context at ~80%**
+  (`COCKPIT_CTX_RESET`) so it stays fast over a long session — the on-screen transcript
+  survives, and the fresh context is seeded with a short continuity summary. **↺ New chat**
+  recycles it manually.
+- Runs with **bypass** permissions so the chat never stalls on a flash; it can Read/Grep
+  the base repo to answer questions.
+
+### Two-stage autocorrect submit
+
+The chat input is a multiline box; **Enter inserts a newline** (it never submits on plain
+Enter). Submitting is a two-step, typo-forgiving flow (`src/autocorrect.ts`, a fast Haiku
+clean-only pass):
+
+- **Single ↑ / Ctrl+Enter** → runs your draft through the autocorrect and **refills the box**
+  with the cleaned text (typos/transposition/punctuation only — meaning, tone, and code
+  tokens preserved; it never answers or acts on the text). Nothing is sent yet.
+- **↑ again** → sends the cleaned text to the dispatcher. Editing after a clean reverts to
+  "fresh" so a single ↑ re-cleans; the **↑ turns green** when the draft is ready to send.
+- **Double-click ↑** → send as typed, skipping the autocorrect.
+
+## Flyout terminal
+
+A persistent shell in the base repo for the occasional manual command (`src/terminal.ts`) —
+**not** a full PTY (no cursor addressing; ANSI/CR are stripped for the plain-text pane), but
+a long-lived piped shell with persistent cwd + env and **zero native dependencies**.
+
+- Toggle with the **▸_ Terminal** button or **Ctrl+`**; dismiss with **✕**, **Escape**, or
+  the toggle. Hiding only slides it away — the shell keeps running and scrollback is kept.
+- **Shell picker: cmd / bash / powershell** (default `cmd`, `COCKPIT_SHELL` overrides;
+  remembered per browser). **↺ restart** kills and respawns the shell (also how you switch).
+- Output is bottom-anchored above the input; **up/down** recall command history; typing is
+  captured at the panel level so it's robust to focus.
 
 ## HTTP API
 
@@ -72,6 +115,13 @@ click **Allow** / **Deny**.
 | POST | `/api/sessions/:id/message` | `{text}` | Follow-up message |
 | POST | `/api/sessions/:id/interrupt` | — | Interrupt the agent |
 | DELETE | `/api/sessions/:id` | — | Dispose + remove worktree |
+| GET | `/api/chat/events` | — | SSE: dispatcher `{state, transcript}` |
+| POST | `/api/chat/message` | `{text}` | Send a message to the dispatcher |
+| POST | `/api/chat/autocorrect` | `{text}` | Clean-only typo pass → `{cleaned}` |
+| POST | `/api/chat/reset` | — | Recycle the dispatcher context (transcript kept) |
+| GET | `/api/terminal/events` | — | SSE: terminal output `{chunk}` |
+| POST | `/api/terminal/input` | `{data}` | Run a line in the shell |
+| POST | `/api/terminal/reset` | `{shell?}` | Restart the shell (optionally switch cmd/bash/powershell) |
 
 ## Merge sequencing (shipped)
 

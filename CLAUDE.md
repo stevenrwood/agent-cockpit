@@ -11,6 +11,12 @@ cockpit shows a live card per session (status, tokens, cost, a color-coded conte
 **flashes when a session needs a permission decision**. It also sequences merging the parallel
 branches back together through an isolated integration branch.
 
+The top area is a persistent **dispatcher chat** — a conversational Claude session the operator
+talks to (plan/decompose/track; it drafts briefs but does **not** spawn workers itself). The
+chat input has a **two-stage autocorrect submit** (a Haiku clean-only pass fixes typos before
+sending). A **flyout terminal** (Ctrl+`) gives a manual shell in the base repo. See `README.md`
+for the full behavior of all three.
+
 It is built on the **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`), TypeScript, run with
 `tsx` (no build step). It is **not** the Messages API and not Managed Agents.
 
@@ -44,6 +50,9 @@ curl -s http://127.0.0.1:8770/api/state      # → []  (empty session list)
 Open `http://127.0.0.1:8770`, or drive the HTTP API directly (see `README.md` for the full
 table). The core loop:
 
+0. **Chat with the dispatcher** (top area) to plan; it drafts briefs to paste into Spawn. The
+   input has a **two-stage submit**: single ↑ / Ctrl+Enter runs a Haiku typo-fix and refills the
+   box, ↑ again sends (double-click ↑ sends as-is). **Ctrl+`** opens a manual terminal.
 1. **Spawn a session** — give a *goal* and a *repo path in OS-native form* (e.g.
    `C:/github/ioSender` on Windows, `/home/me/proj` on Unix). The cockpit creates a worktree on
    a new branch `cockpit/<id>` off the repo's current HEAD and starts a Claude session in it.
@@ -81,13 +90,19 @@ Native non-Anthropic agents (a real GPT/Gemini agent, or CLI agents like aider) 
 - `src/types.ts` — the **`SessionDriver` interface** and state/snapshot types. The whole app
   talks to this; nothing in the shell is Claude-specific.
 - `src/drivers/claudeAgent.ts` — the Claude Agent SDK driver: streaming input queue (kept open so
-  `canUseTool` can fire), permission routing, telemetry, context meter.
+  `canUseTool` can fire), permission routing, telemetry, context meter, transcript accumulation.
+- `src/dispatcher.ts` — the persistent conversational dispatcher session (wraps a driver): custom
+  role prompt, transcript, and context auto-recycle at the threshold.
+- `src/autocorrect.ts` — the one-shot Haiku clean-only pass for the two-stage chat submit.
+- `src/terminal.ts` — the persistent piped shell (cmd/bash/powershell) behind the flyout terminal.
 - `src/sessionManager.ts` — worktree lifecycle, session registry, SSE fan-out, and all merge
   sequencing (integration worktree, merge/abort/promote, teardown).
 - `src/git.ts` — non-throwing git helpers (ahead/behind, trial-merge conflict preflight,
   merge/ff/abort, worktree discovery).
-- `src/server.ts` — `node:http` server: static UI + REST + SSE (`/api/events`) + shutdown/signals.
-- `public/index.html` — the single-file vanilla-JS UI (cards, flash, meters, merge controls).
+- `src/server.ts` — `node:http` server: static UI + REST + SSE (`/api/events`, `/api/chat/*`,
+  `/api/terminal/*`) + shutdown/signals. SSE writes are non-throwing (a disconnect can't crash it).
+- `public/index.html` — the single-file vanilla-JS UI (dispatcher chat, cards, flyout terminal,
+  flash, meters, merge controls).
 
 ## Extending: add a provider driver
 

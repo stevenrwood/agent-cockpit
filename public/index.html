@@ -126,6 +126,17 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 10px 12px; }
       .termin input:focus { outline: none; box-shadow: none; }
 
+      /* ---------- first-run welcome ---------- */
+      .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.42); display: none;
+        align-items: center; justify-content: center; z-index: 50; }
+      .modal.show { display: flex; }
+      .modal .box { background: var(--panel); border: 1px solid var(--border); border-top: 4px solid var(--claude);
+        border-radius: 12px; max-width: 460px; margin: 20px; padding: 24px; box-shadow: 0 14px 44px rgba(0,0,0,0.28); }
+      .modal .box h2 { margin: 0 0 8px; color: var(--claude-d); font-size: 18px; }
+      .modal .box h2 .g { color: var(--claude); }
+      .modal .box p { margin: 8px 0 18px; color: var(--text); font-size: 14px; line-height: 1.55; }
+      .modal .box .actions { display: flex; gap: 8px; justify-content: flex-end; }
+
       /* ---------- session cards (unchanged) ---------- */
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
       .card { background: var(--panel); border: 1px solid var(--border);
@@ -191,6 +202,7 @@
       <button id="spawnToggle">＋ Spawn session</button>
       <button class="ghost" id="refreshMerge" style="margin-left:auto">↻ Check all merges</button>
       <button class="ghost" id="termToggle" title="Toggle terminal (Ctrl+`)">▸_ Terminal</button>
+      <a class="btn ghost" id="helpBtn" href="/help" target="_blank" rel="noopener" title="Open the manual (how to use the cockpit)">? Help</a>
       <button class="ghost" id="shutdown" title="Tear down all cockpit worktrees (branches kept) and stop the server">⏻ Shutdown</button>
     </header>
     <main>
@@ -265,6 +277,20 @@
       <div class="grid" id="grid"></div>
       <div class="empty" id="empty">No worker sessions yet. Use ＋ Spawn session — each gets its own git worktree.</div>
     </main>
+
+    <!-- First-run welcome: offers the manual, once -->
+    <div class="modal" id="welcome">
+      <div class="box">
+        <h2><span class="g">⌁</span> Welcome to Agent Cockpit</h2>
+        <p>Run several Claude sessions in parallel and steer them from one place. New here? The
+          manual walks through the dispatcher chat, spawning workers, permission flashes, merging,
+          and the terminal — with common usage patterns. You can reopen it anytime via <b>? Help</b>.</p>
+        <div class="actions">
+          <button class="ghost" id="welcomeDismiss">Not now</button>
+          <button class="primary" id="welcomeOpen">Open the manual →</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Flyout terminal -->
     <aside class="term" id="termPanel">
@@ -759,6 +785,16 @@
       const ev = new EventSource('/api/events');
       ev.onmessage = (m) => render(JSON.parse(m.data));
       ev.onerror = () => {};
+
+      /* ================= FIRST-RUN WELCOME ================= */
+      const welcome = document.getElementById('welcome');
+      function closeWelcome() { welcome.classList.remove('show'); localStorage.setItem('cockpit.seenWelcome', '1'); }
+      if (!localStorage.getItem('cockpit.seenWelcome')) welcome.classList.add('show');
+      document.getElementById('welcomeDismiss').addEventListener('click', closeWelcome);
+      document.getElementById('welcomeOpen').addEventListener('click', () => {
+        window.open('/help', '_blank', 'noopener');
+        closeWelcome();
+      });
     </script>
   </body>
 </html>
