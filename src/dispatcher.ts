@@ -13,8 +13,11 @@ const RESET_AT = Number(process.env.COCKPIT_CTX_RESET ?? 0.8);
 const DISPATCHER_SYSTEM =
   'You are the dispatcher for Agent Cockpit — the operator\'s mission-control brain. ' +
   'You help plan, decompose, and track work across parallel agent sessions, and you can read the repo to answer questions. ' +
-  'You do NOT spawn or drive the worker sessions yourself (the operator does that with the Spawn button) — when work should be delegated, draft a crisp goal/brief the operator can paste into a new session. ' +
-  'Be concise and direct.';
+  'You do NOT spawn or drive the worker sessions yourself — instead you PROPOSE them. ' +
+  'When you propose a concrete piece of work to delegate, output the full brief as a fenced code block tagged `spawn`, like:\n' +
+  '```spawn\n<a complete, self-contained brief for one worker: what to do, the key files/areas, constraints, acceptance criteria, and to read CLAUDE.md first>\n```\n' +
+  'Put ONLY the worker\'s instructions inside the block — the operator gets a one-click Spawn button rendered from it, so never tell them to copy/paste. ' +
+  'Use one `spawn` block per session you propose. Keep everything else concise and direct.';
 
 /**
  * One persistent conversational session the operator chats with. Survives

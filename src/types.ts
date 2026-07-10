@@ -59,6 +59,7 @@ export interface DriverStartOptions {
   baseURL?: string; // Tier-1: point the harness at a gateway (LiteLLM/Ollama/...)
   apiKey?: string; // optional per-session key for that gateway
   systemPrompt?: string; // custom system prompt (dispatcher role); omit to use the default preset
+  systemPromptAppend?: string; // append to the default claude_code preset (worker standing directives)
   permissionMode?: 'default' | 'acceptEdits' | 'plan';
   // Cockpit-side auto-approval policy (independent of the SDK permissionMode).
   // canUseTool stays active so the cockpit remains the source of truth; this
@@ -93,6 +94,13 @@ export interface SessionDriver {
   dispose(): void;
 }
 
+/** The repo's own build/run/test commands, from its `.cockpit.json`. */
+export interface RepoManifest {
+  build?: string;
+  run?: string;
+  test?: string;
+}
+
 export interface MergeStatus {
   baseBranch: string; // the ultimate base this session came off
   targetBranch: string; // where merges actually land: the integration branch (or base until it exists)
@@ -116,4 +124,6 @@ export interface SessionSnapshot extends DriverState {
   baseURL?: string;
   createdAt: number;
   merge?: MergeStatus;
+  uncommitted?: boolean; // true once a turn finished with a dirty worktree (must commit all work)
+  manifest?: RepoManifest; // the repo's own build/run/test commands, if it defines any
 }

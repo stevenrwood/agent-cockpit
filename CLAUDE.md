@@ -39,6 +39,10 @@ npm start            # → http://127.0.0.1:8770   (set COCKPIT_PORT to change)
 That's it — there is no build, no database, no external service. It binds to `127.0.0.1` only
 and has **no authentication** (single local operator by design — do not expose it to a network).
 
+To check on it from your phone, `.\cockpit.ps1 -Tailscale` binds to this PC's Tailscale IP
+instead (needs a one-time firewall rule scoped to the Tailscale adapter — see README.md). Never
+bind to a real LAN/public interface: there is still no login.
+
 To verify it's up without a browser:
 
 ```sh
@@ -61,7 +65,12 @@ table). The core loop:
    agent is blocked waiting on you. Allow or Deny.
    `POST /api/sessions/:id/permission {permissionId, allow, message?}`.
 3. **Follow up / interrupt / take over** — send more messages, interrupt, or **⧉ VS Code** to
-   open that worktree and work by hand.
+   open that worktree and work by hand. **⟳ Term** opens a terminal scoped to that worktree.
+   If the repo commits a `.cockpit.json` (`{build?, run?, test?}`), the card shows a button per
+   command it defines — the cockpit never guesses a build command.
+3a. **Workers must commit everything** — the system prompt directs it, and the cockpit flags
+   a session `uncommitted` (and nudges once) if a turn ends with a dirty worktree. Specs/design
+   docs belong in the repo, never a temp folder.
 4. **Merge sequencing** — **↻ Check all merges** computes each branch's status vs the base
    (ahead/behind, dirty, and a real conflict preflight). **Merge → \<integration\>** merges a
    branch into a cockpit-owned integration branch `cockpit/int/<base>` (in its own worktree —
@@ -94,7 +103,9 @@ Native non-Anthropic agents (a real GPT/Gemini agent, or CLI agents like aider) 
 - `src/dispatcher.ts` — the persistent conversational dispatcher session (wraps a driver): custom
   role prompt, transcript, and context auto-recycle at the threshold.
 - `src/autocorrect.ts` — the one-shot Haiku clean-only pass for the two-stage chat submit.
-- `src/terminal.ts` — the persistent piped shell (cmd/bash/powershell) behind the flyout terminal.
+- `src/terminal.ts` — `Terminal` (one piped shell, cmd/bash/powershell) + `TerminalManager`
+  (keyed by id: `base` or a session id) behind the base and per-session flyout terminals.
+- `src/manifest.ts` — reads/validates a repo's `.cockpit.json` (`{build?, run?, test?}`).
 - `src/sessionManager.ts` — worktree lifecycle, session registry, SSE fan-out, and all merge
   sequencing (integration worktree, merge/abort/promote, teardown).
 - `src/git.ts` — non-throwing git helpers (ahead/behind, trial-merge conflict preflight,

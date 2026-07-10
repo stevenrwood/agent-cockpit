@@ -3,13 +3,20 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SessionManager } from './sessionManager.js';
-import { Dispatcher } from './dispatcher.js';
-import { Terminal, normalizeShell } from './terminal.js';
+import { Dispatcher, BASE_REPO } from './dispatcher.js';
+import { TerminalManager, normalizeShell } from './terminal.js';
 import { autocorrect } from './autocorrect.js';
 import { renderHelp } from './helpPage.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.COCKPIT_PORT ?? 8770);
+// Default stays loopback-only (single local operator, no auth). Set
+// COCKPIT_HOST=0.0.0.0 (or a specific interface IP, e.g. the Tailscale address)
+// to reach the cockpit from another of YOUR OWN devices — e.g. over a Tailscale
+// tailnet, which is authenticated device-to-device and never public internet.
+// Do not set this to expose the cockpit to an untrusted network: there is still
+// no login, and anyone who can reach the port can drive real agent sessions.
+const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1';
 const manager = new SessionManager();
 
 // The dispatcher chat + a shared base-repo terminal. Both are singletons that
@@ -21,10 +28,10 @@ function getDispatcher(): Dispatcher {
   if (!dispatcher) dispatcher = new Dispatcher(() => { for (const cb of chatListeners) cb(); });
   return dispatcher;
 }
-let terminal: Terminal | null = null;
-function getTerminal(): Terminal {
-  if (!terminal) terminal = new Terminal();
-  return terminal;
+// Terminals keyed by id: 'base' (base repo) + one per session (its worktree).
+const terminals = new TerminalManager();
+function terminalCwd(id: string): string | undefined {
+  return id === 'base' ? BASE_REPO : manager.getCwd(id);
 }
 
 function send(res: http.ServerResponse, code: number, body: unknown) {
@@ -131,27 +138,35 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
-    // --- shared base-repo terminal ---
-    if (method === 'GET' && url.pathname === '/api/terminal/events') {
-      const term = getTerminal(); // resolve BEFORE opening the stream (may spawn shell)
-      const write = openSSE(res);
-      const unsub = term.subscribe((chunk) => write({ chunk }));
-      const ka = setInterval(() => write(': keep-alive\n\n'), 15000);
-      req.on('close', () => {
-        clearInterval(ka);
-        unsub();
-      });
-      return;
-    }
-    if (method === 'POST' && url.pathname === '/api/terminal/input') {
-      const body = await readBody(req);
-      getTerminal().write(String(body.data ?? ''));
-      return send(res, 200, { ok: true });
-    }
-    if (method === 'POST' && url.pathname === '/api/terminal/reset') {
-      const body = await readBody(req);
-      getTerminal().reset(body.shell ? normalizeShell(body.shell) : undefined);
-      return send(res, 200, { ok: true, shell: getTerminal().getShell() });
+    // --- terminals: /api/terminal/:id/(events|input|reset) — id 'base' or a session id ---
+    if (parts[0] === 'api' && parts[1] === 'terminal' && parts[2]) {
+      const tid = parts[2];
+      const action = parts[3];
+      const cwd = terminalCwd(tid);
+      if (!cwd) return send(res, 404, { error: 'no such terminal target' });
+
+      if (method === 'GET' && action === 'events') {
+        const term = terminals.get(tid, cwd); // resolve BEFORE opening the stream (may spawn shell)
+        const write = openSSE(res);
+        const unsub = term.subscribe((chunk) => write({ chunk }));
+        const ka = setInterval(() => write(': keep-alive\n\n'), 15000);
+        req.on('close', () => {
+          clearInterval(ka);
+          unsub();
+        });
+        return;
+      }
+      if (method === 'POST' && action === 'input') {
+        const body = await readBody(req);
+        terminals.get(tid, cwd).write(String(body.data ?? ''));
+        return send(res, 200, { ok: true });
+      }
+      if (method === 'POST' && action === 'reset') {
+        const body = await readBody(req);
+        const term = terminals.get(tid, cwd);
+        term.reset(body.shell ? normalizeShell(body.shell) : undefined);
+        return send(res, 200, { ok: true, shell: term.getShell() });
+      }
     }
 
     // --- recompute merge status for all sessions ---
@@ -239,6 +254,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, ok ? 200 : 404, { ok });
       }
       if (method === 'DELETE' && !action) {
+        terminals.dispose(id); // kill this session's terminal before its worktree goes
         const ok = await manager.remove(id);
         return send(res, ok ? 200 : 404, { ok });
       }
@@ -250,8 +266,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`agent-cockpit → http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`agent-cockpit → http://${HOST}:${PORT}`);
 });
 
 // Graceful teardown: on Ctrl+C / kill, dispose sessions and remove all cockpit
@@ -263,7 +279,7 @@ async function shutdown(signal: string) {
   console.log(`\n${signal} → tearing down worktrees…`);
   try {
     dispatcher?.dispose();
-    terminal?.dispose();
+    terminals.disposeAll();
   } catch {
     /* ignore */
   }

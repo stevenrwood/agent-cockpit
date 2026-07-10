@@ -9,6 +9,13 @@
     .\cockpit.ps1 open         # just open the standalone window (server already running)
     .\cockpit.ps1 restart      # kill the server on the port + start fresh (backend change)
     .\cockpit.ps1 stop         # kill the server on the port
+    .\cockpit.ps1 -Tailscale   # bind to this device's Tailscale IP instead of loopback,
+                               # so your phone (on the same tailnet) can reach the cockpit.
+                               # One-time setup: run as Administrator once -
+                               #   New-NetFirewallRule -DisplayName 'Agent Cockpit (Tailscale)' `
+                               #     -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8770 `
+                               #     -InterfaceAlias 'Tailscale' -Profile Any
+                               # (scoped to the Tailscale adapter only - nothing opens on your LAN/Wi-Fi NIC).
 
   Recycle rule:
     - Front-end change (public/*.html/.css/.js) -> just HARD-REFRESH the window (Ctrl+F5).
@@ -17,12 +24,21 @@
 
   Port: $env:COCKPIT_PORT or 8770.
 #>
-param([ValidateSet('start','open','restart','stop')] [string]$Action = 'start')
+param(
+  [ValidateSet('start','open','restart','stop')] [string]$Action = 'start',
+  [switch]$Tailscale
+)
 
 $ErrorActionPreference = 'Stop'
 $port = if ($env:COCKPIT_PORT) { $env:COCKPIT_PORT } else { '8770' }
-$url  = "http://127.0.0.1:$port"
 $root = $PSScriptRoot
+
+$hostAddr = '127.0.0.1'
+if ($Tailscale) {
+  $hostAddr = (& tailscale ip -4 2>$null | Select-Object -First 1)
+  if (-not $hostAddr) { Write-Warning "Could not read a Tailscale IP (is Tailscale running?) - falling back to 127.0.0.1."; $hostAddr = '127.0.0.1' }
+}
+$url = "http://${hostAddr}:$port"
 
 function Get-CockpitPid {
   $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -37,13 +53,15 @@ function Stop-Cockpit {
 
 function Start-Cockpit {
   if (Get-CockpitPid) { Write-Host "Server already up on :$port"; return }
-  Write-Host "Starting server on :$port ..."
-  # Must be npm.cmd, not 'npm' — Start-Process can't resolve the extensionless
-  # shim on Windows and silently fails to launch.
-  Start-Process -FilePath 'npm.cmd' -ArgumentList 'start' -WorkingDirectory $root -WindowStyle Minimized
+  Write-Host "Starting server on ${hostAddr}:$port ..."
+  # cmd /c 'set VAR=...&& npm.cmd start' - Start-Process on PS 5.1 has no -Environment
+  # param, and 'npm' (extensionless) doesn't resolve directly; go through cmd.exe.
+  Start-Process -FilePath 'cmd.exe' `
+    -ArgumentList '/c', "set COCKPIT_HOST=$hostAddr&& npm.cmd start" `
+    -WorkingDirectory $root -WindowStyle Minimized
   for ($i = 0; $i -lt 45; $i++) {
     Start-Sleep -Milliseconds 400
-    if (Get-CockpitPid) { Write-Host "Server up."; return }
+    if (Get-CockpitPid) { Write-Host "Server up -> $url"; return }
   }
   Write-Warning "Server did not come up within ~18s; check the npm window."
 }

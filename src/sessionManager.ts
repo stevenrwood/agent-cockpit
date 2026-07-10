@@ -5,8 +5,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ClaudeAgentDriver } from './drivers/claudeAgent.js';
 import * as g from './git.js';
+import { readManifest } from './manifest.js';
 import { renderResults } from './resultsView.js';
-import type { MergeStatus, PermissionDecision, SessionDriver, SessionSnapshot } from './types.js';
+import type { MergeStatus, PermissionDecision, RepoManifest, SessionDriver, SessionSnapshot } from './types.js';
 
 const exec = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -23,7 +24,24 @@ interface Session {
   createdAt: number;
   driver: SessionDriver;
   merge?: MergeStatus; // cached; recomputed on demand + after merges
+  uncommitted?: boolean; // last turn finished with a dirty worktree
+  commitNudged?: boolean; // we already told it to commit since the last user message
+  manifest?: RepoManifest; // read once at spawn time from the worktree's .cockpit.json
 }
+
+// Appended to every worker's system prompt (keeps the claude_code preset +
+// CLAUDE.md, adds the cockpit's session rules).
+const WORKER_DIRECTIVE =
+  '\n\n## Agent Cockpit session rules\n' +
+  '- When you finish the requested work, COMMIT ALL of it to the current git branch with a clear message. ' +
+  'Leave NO uncommitted changes — the cockpit flags the session as failed if the worktree is dirty when you stop.\n' +
+  '- Any spec, design doc, plan, or notes you produce must be written INTO the repository (e.g. a docs/ folder), ' +
+  'never into a temp/scratch directory.';
+
+// Auto-nudge sent once when a session stops with a dirty worktree.
+const COMMIT_NUDGE =
+  'You stopped with uncommitted changes in this worktree. Commit ALL your work to the current branch now ' +
+  'with a clear message (and make sure any spec/design docs live in the repo, not a temp folder). Then you are done.';
 
 export interface CreateSessionInput {
   repo: string;
@@ -51,6 +69,36 @@ export class SessionManager {
     for (const cb of this.listeners) cb();
   }
 
+  /** Worktree cwd for a session (used to scope a per-session terminal). */
+  getCwd(id: string): string | undefined {
+    return this.sessions.get(id)?.cwd;
+  }
+
+  // Per-session driver change: fan out, and when a turn finishes, enforce the
+  // "commit all your work" rule — a dirty worktree at rest flags the session and
+  // (once) nudges the agent to commit.
+  private onDriverChange(s: Session): void {
+    this.emit();
+    const st = s.driver.getState();
+    if (st.status === 'idle' || st.status === 'done') void this.checkCommitted(s);
+  }
+
+  private async checkCommitted(s: Session): Promise<void> {
+    try {
+      const dirty = !(await g.isClean(s.cwd));
+      // No state change and nothing left to do → skip.
+      if (dirty === !!s.uncommitted && (!dirty || s.commitNudged)) return;
+      s.uncommitted = dirty;
+      if (dirty && !s.commitNudged) {
+        s.commitNudged = true;
+        s.driver.sendMessage(COMMIT_NUDGE); // one-shot self-correct
+      }
+      this.emit();
+    } catch {
+      /* ignore */
+    }
+  }
+
   snapshots(): SessionSnapshot[] {
     return [...this.sessions.values()].map((s) => ({
       id: s.id,
@@ -62,6 +110,8 @@ export class SessionManager {
       baseURL: s.baseURL,
       createdAt: s.createdAt,
       merge: s.merge,
+      uncommitted: s.uncommitted,
+      manifest: s.manifest,
       ...s.driver.getState(),
     }));
   }
@@ -84,7 +134,11 @@ export class SessionManager {
     // Isolate the session on its own worktree + branch off the repo's HEAD.
     await exec('git', ['-C', input.repo, 'worktree', 'add', '-b', branch, cwd, 'HEAD']);
 
-    const driver = new ClaudeAgentDriver(() => this.emit());
+    // The repo's own build/run/test commands, if it defines any (.cockpit.json).
+    // Read from the worktree so a branch that edits the manifest is honored.
+    const manifest = readManifest(cwd);
+
+    const driver = new ClaudeAgentDriver(() => this.onDriverChange(session));
     const session: Session = {
       id,
       goal: input.goal,
@@ -95,6 +149,7 @@ export class SessionManager {
       baseURL: input.baseURL,
       createdAt: Date.now(),
       driver,
+      manifest,
     };
     this.sessions.set(id, session);
 
@@ -104,6 +159,7 @@ export class SessionManager {
       model: input.model,
       baseURL: input.baseURL,
       apiKey: input.apiKey,
+      systemPromptAppend: WORKER_DIRECTIVE,
       permissionMode: input.permissionMode,
       permissionPolicy: input.permissionPolicy,
     });
@@ -137,6 +193,7 @@ export class SessionManager {
   sendMessage(id: string, text: string): boolean {
     const s = this.sessions.get(id);
     if (!s) return false;
+    s.commitNudged = false; // a fresh instruction re-arms the commit nudge
     s.driver.sendMessage(text);
     return true;
   }

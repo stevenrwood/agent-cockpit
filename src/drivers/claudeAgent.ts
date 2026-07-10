@@ -108,7 +108,13 @@ export class ClaudeAgentDriver implements SessionDriver {
         cwd: opts.cwd,
         model: opts.model,
         env,
-        ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+        // A full custom prompt wins (dispatcher); otherwise keep the claude_code
+        // preset (loads CLAUDE.md) and append the worker standing directives.
+        ...(opts.systemPrompt
+          ? { systemPrompt: opts.systemPrompt }
+          : opts.systemPromptAppend
+            ? { systemPrompt: { type: 'preset', preset: 'claude_code', append: opts.systemPromptAppend } }
+            : {}),
         permissionMode: opts.permissionMode ?? 'default',
         // Load nothing from disk — the cockpit is the source of truth for
         // permissions, so every non-trivial tool routes through canUseTool.

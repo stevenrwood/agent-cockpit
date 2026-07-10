@@ -103,6 +103,32 @@ a long-lived piped shell with persistent cwd + env and **zero native dependencie
 - Output is bottom-anchored above the input; **up/down** recall command history; typing is
   captured at the panel level so it's robust to focus.
 
+## Build & Run — repo-defined via `.cockpit.json`
+
+The cockpit never guesses a repo-specific build/test/launch command. A repo opts in by
+committing a `.cockpit.json` at its root:
+
+```json
+{
+  "build": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug",
+  "run":   "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug -Launch",
+  "test":  "npm test"
+}
+```
+
+All three keys are optional strings; the worker card shows a button only for the ones
+present (**🔨 Build** / **▶ Run** / **✓ Test**) — no manifest, no buttons. Read once from
+the session's **worktree** at spawn time (so a branch that edits `.cockpit.json` is
+honored), the chosen command runs in that worktree and streams into that session's
+terminal (see below).
+
+## Per-session terminal
+
+Every worker card has **▸_ Term** — a persistent shell rooted in *that session's
+worktree* (separate from the header's base-repo terminal). Same shell picker
+(cmd/bash/powershell), same bottom-anchored output + history recall. Useful for
+anything the manifest buttons don't cover, or for poking around a branch by hand.
+
 ## HTTP API
 
 | Method | Path | Body | Purpose |
@@ -115,13 +141,13 @@ a long-lived piped shell with persistent cwd + env and **zero native dependencie
 | POST | `/api/sessions/:id/message` | `{text}` | Follow-up message |
 | POST | `/api/sessions/:id/interrupt` | — | Interrupt the agent |
 | DELETE | `/api/sessions/:id` | — | Dispose + remove worktree |
+| GET | `/api/terminal/:id/events` | — | SSE: terminal output `{chunk}` (`:id` = `base` or a session id) |
+| POST | `/api/terminal/:id/input` | `{data}` | Run a line in that terminal |
+| POST | `/api/terminal/:id/reset` | `{shell?}` | Restart that shell (optionally switch cmd/bash/powershell) |
 | GET | `/api/chat/events` | — | SSE: dispatcher `{state, transcript}` |
 | POST | `/api/chat/message` | `{text}` | Send a message to the dispatcher |
 | POST | `/api/chat/autocorrect` | `{text}` | Clean-only typo pass → `{cleaned}` |
 | POST | `/api/chat/reset` | — | Recycle the dispatcher context (transcript kept) |
-| GET | `/api/terminal/events` | — | SSE: terminal output `{chunk}` |
-| POST | `/api/terminal/input` | `{data}` | Run a line in the shell |
-| POST | `/api/terminal/reset` | `{shell?}` | Restart the shell (optionally switch cmd/bash/powershell) |
 
 ## Merge sequencing (shipped)
 
@@ -179,6 +205,29 @@ window is set immediately from the model on session init and overridden with the
 `modelUsage.contextWindow` on the first result; occupancy is the most recent request's
 input + cache tokens (current context, not cumulative billing), and a compaction (`↺`) drops
 it naturally.
+
+## Remote access from your phone (Tailscale)
+
+The server only ever binds to loopback by default (`127.0.0.1`, no auth — see CLAUDE.md).
+To check on sessions from your phone over your own [Tailscale](https://tailscale.com)
+tailnet (never the public internet):
+
+```sh
+.\cockpit.ps1 -Tailscale        # binds to this PC's Tailscale IP instead of loopback
+```
+
+**One-time setup**, in an **elevated** PowerShell (Run as Administrator):
+
+```powershell
+New-NetFirewallRule -DisplayName 'Agent Cockpit (Tailscale)' -Direction Inbound `
+  -Action Allow -Protocol TCP -LocalPort 8770 -InterfaceAlias 'Tailscale' -Profile Any
+```
+
+This scopes the allow rule to the Tailscale virtual adapter only — it does **not** open
+anything on your real LAN/Wi-Fi NIC. Then, from your phone (with the Tailscale app signed
+into the same account), browse to `http://<this-pc-tailscale-ip>:8770` (find the IP with
+`tailscale ip -4` or `tailscale status`). To remove the rule later:
+`Remove-NetFirewallRule -DisplayName 'Agent Cockpit (Tailscale)'`.
 
 ## Known open work (next slices)
 

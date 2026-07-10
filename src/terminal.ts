@@ -103,6 +103,34 @@ export class Terminal {
   }
 }
 
+/** Owns multiple terminals keyed by id ('base' + one per session worktree). */
+export class TerminalManager {
+  private terms = new Map<string, Terminal>();
+
+  /** Get-or-create the terminal for `id` rooted at `cwd`. */
+  get(id: string, cwd: string, shell?: ShellKind): Terminal {
+    let t = this.terms.get(id);
+    if (!t) {
+      t = new Terminal(shell, cwd);
+      this.terms.set(id, t);
+    }
+    return t;
+  }
+
+  dispose(id: string) {
+    const t = this.terms.get(id);
+    if (t) {
+      t.dispose();
+      this.terms.delete(id);
+    }
+  }
+
+  disposeAll() {
+    for (const t of this.terms.values()) t.dispose();
+    this.terms.clear();
+  }
+}
+
 // Strip ANSI CSI/OSC escape sequences and carriage returns so the plain-text
 // flyout doesn't show raw escape codes (bash -i colours its prompt) or stray \r.
 function clean(s: string): string {

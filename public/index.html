@@ -98,6 +98,19 @@
       .sendbtn.cleaned:hover { filter: brightness(0.95); background: var(--ok); }
       .chatinput .chatHint { min-height: 16px; }
       .chatempty { color: var(--dim); text-align: center; padding: 24px; }
+      /* inline "proposed session" card rendered from a dispatcher ```spawn block */
+      .spawncard { align-self: stretch; max-width: 100%; background: var(--claude-soft);
+        border: 1px solid var(--claude); border-radius: 10px; padding: 12px; display: flex;
+        flex-direction: column; gap: 8px; margin: 2px 0; }
+      .spawncard .sc-h { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--claude-d); }
+      .spawncard textarea.sc-goal { width: 100%; min-height: 90px; max-height: 40vh; resize: vertical;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+      .spawncard .sc-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--dim); }
+      .spawncard .sc-row label { display: flex; gap: 5px; align-items: center; }
+      .spawncard .sc-row input, .spawncard .sc-row select { padding: 4px 6px; font-size: 12px; }
+      .spawncard .sc-row input.sc-repo { min-width: 200px; }
+      .spawncard button.sc-spawn { align-self: flex-start; }
+      .spawncard.spawned { opacity: .72; }
 
       /* ---------- flyout terminal ---------- */
       .term {
@@ -162,6 +175,8 @@
       .badge.starting { background: #fff8c5; color: var(--warn); }
       .badge.error, .badge.interrupted { background: #ffebe9; color: var(--flash); }
       .meta { color: var(--dim); font-size: 12px; }
+      .uncommitted { background: #fff1e5; border: 1px solid var(--warn); color: #7a4d00;
+        border-radius: 8px; padding: 8px 10px; font-size: 12.5px; font-weight: 600; }
       select.cardpolicy { padding: 2px 6px; font-size: 12px; }
       .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
       .stat { background: var(--panel2); border-radius: 6px; padding: 6px 8px; }
@@ -210,7 +225,7 @@
       <form class="new" id="newForm" style="display:none">
         <label>
           <span>Goal / instructions <span class="req">*</span> — this is the prompt the session starts with (paste the full brief)</span>
-          <textarea class="goal" name="goal" placeholder="e.g. Implement Check-for-updates in Help&gt;Support: query GitHub releases of ioSenderV2/ioSender, compare to running version… (read CLAUDE.md first)" required></textarea>
+          <textarea class="goal" name="goal" placeholder="e.g. Implement Check-for-updates in Help&gt;Support: query GitHub releases of ioSenderV2/ioSender, compare to running version… (read CLAUDE.md first)" required spellcheck="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"></textarea>
         </label>
         <label>
           <span>Repo path <span class="req">*</span></span>
@@ -267,7 +282,7 @@
         </div>
         <div class="chatinput">
           <div class="rowin">
-            <textarea id="chatText" placeholder="Talk to the dispatcher…  (Ctrl+Enter = clean-then-send · double-click ↑ = send as-is)"></textarea>
+            <textarea id="chatText" placeholder="Talk to the dispatcher…  (Ctrl+Enter = clean-then-send · double-click ↑ = send as-is)" spellcheck="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"></textarea>
             <button class="sendbtn" id="chatSend" title="Click: clean up typos ✦  ·  Double-click: send as-is">✦↑</button>
           </div>
           <div class="hint chatHint" id="chatHint">Click ↑ to auto-fix typos first (then ↑ again to send). Double-click ↑ to send as typed.</div>
@@ -307,7 +322,7 @@
         <button id="termClose">✕</button>
       </div>
       <div class="termbody" id="termBody"><pre class="termout" id="termOut"></pre></div>
-      <div class="termin"><span class="prompt">❯</span><input id="termIn" placeholder="type a command + Enter…  (runs in the base repo)" autocomplete="off" /></div>
+      <div class="termin"><span class="prompt">❯</span><input id="termIn" placeholder="type a command + Enter…  (runs in the base repo)" autocomplete="off" spellcheck="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" /></div>
     </aside>
 
     <script>
@@ -489,15 +504,83 @@
         if (confirm('Recycle the dispatcher context? The transcript stays; the model starts fresh.')) post('/api/chat/reset', {});
       });
 
+      const spawnedBriefs = new Set(); // brief keys already spawned (survive re-render, block dupes)
+      function hashStr(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return 'b' + (h >>> 0).toString(36); }
+
       function chatMsgHtml(e) {
         if (e.role === 'user') return `<div class="msg user">${esc(e.text)}</div>`;
-        if (e.role === 'assistant') return `<div class="msg asst">${esc(e.text)}</div>`;
+        if (e.role === 'assistant') return renderAssistant(e.text || '');
         if (e.role === 'system') return `<div class="msg sys">${esc(e.text)}</div>`;
         if (e.role === 'tool') {
           const inp = e.toolInput ? ' ' + esc(compactInput(e.toolInput)) : '';
           return `<div class="msg tool">⚙ ${esc(e.tool)}${inp}</div>`;
         }
         return '';
+      }
+
+      // Split an assistant message into prose bubbles + inline Spawn cards for any
+      // ```spawn fenced blocks the dispatcher emitted.
+      function renderAssistant(text) {
+        const re = /```spawn[^\n]*\n([\s\S]*?)```/g;
+        let out = '', last = 0, m;
+        while ((m = re.exec(text))) {
+          const before = text.slice(last, m.index).trim();
+          if (before) out += `<div class="msg asst">${esc(before)}</div>`;
+          out += spawnCardHtml(m[1].trim());
+          last = re.lastIndex;
+        }
+        const rest = text.slice(last).trim();
+        if (rest) out += `<div class="msg asst">${esc(rest)}</div>`;
+        return out || `<div class="msg asst">${esc(text)}</div>`;
+      }
+
+      function optionList(pairs, sel) {
+        return pairs.map(([v, label]) => `<option value="${esc(v)}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`).join('');
+      }
+      const MODEL_OPTS = [['', 'Default'], ['claude-opus-4-8', 'Opus 4.8'], ['claude-sonnet-5', 'Sonnet 5'], ['claude-haiku-4-5-20251001', 'Haiku 4.5'], ['claude-fable-5', 'Fable 5']];
+      const PERM_OPTS = [['acceptEdits', 'Accept edits'], ['bypass', 'Bypass'], ['ask', 'Ask']];
+
+      function spawnCardHtml(goal) {
+        const key = hashStr(goal);
+        const done = spawnedBriefs.has(key);
+        const repo = localStorage.getItem('cockpit.lastRepo') || DEFAULT_REPO;
+        const model = localStorage.getItem('cockpit.lastModel') || '';
+        const perm = localStorage.getItem('cockpit.lastPolicy') || 'acceptEdits';
+        const dis = done ? ' disabled' : '';
+        return `<div class="spawncard${done ? ' spawned' : ''}" data-key="${key}">
+          <div class="sc-h">▸ proposed session — edit &amp; spawn</div>
+          <textarea class="sc-goal" data-sc-goal${dis} spellcheck="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false">${esc(goal)}</textarea>
+          <div class="sc-row">
+            <label>repo <input class="sc-repo" data-sc-repo value="${esc(repo)}"${dis} /></label>
+            <label>model <select data-sc-model${dis}>${optionList(MODEL_OPTS, model)}</select></label>
+            <label>perms <select data-sc-perm${dis}>${optionList(PERM_OPTS, perm)}</select></label>
+          </div>
+          <button type="button" class="primary sc-spawn" data-sc-spawn${dis}>${done ? '✓ spawned' : '▸ Spawn session'}</button>
+        </div>`;
+      }
+
+      // Wire the Spawn buttons on any freshly-rendered inline briefs.
+      function wireSpawnCards() {
+        chatlog.querySelectorAll('[data-sc-spawn]').forEach((btn) => {
+          if (btn._wired) return; btn._wired = true;
+          btn.addEventListener('click', async () => {
+            const card = btn.closest('.spawncard');
+            const goal = card.querySelector('[data-sc-goal]').value.trim();
+            const repo = card.querySelector('[data-sc-repo]').value.trim();
+            const model = card.querySelector('[data-sc-model]').value;
+            const perm = card.querySelector('[data-sc-perm]').value;
+            if (!goal || !repo) { alert('goal and repo are required'); return; }
+            btn.disabled = true; btn.textContent = 'spawning…';
+            const r = await post('/api/sessions', { goal, repo, model: model || undefined, permissionPolicy: perm || undefined });
+            if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Failed: ' + (e.error || r.status)); btn.disabled = false; btn.textContent = '▸ Spawn session'; return; }
+            localStorage.setItem('cockpit.lastRepo', repo);
+            localStorage.setItem('cockpit.lastModel', model);
+            localStorage.setItem('cockpit.lastPolicy', perm);
+            spawnedBriefs.add(card.dataset.key);
+            card.classList.add('spawned'); btn.textContent = '✓ spawned';
+            card.querySelectorAll('textarea,input,select,button').forEach((el) => (el.disabled = true));
+          });
+        });
       }
       function compactInput(o) {
         try {
@@ -526,11 +609,19 @@
         } else {
           bar.style.width = '0%'; label.textContent = 'context —';
         }
-        const nearBottom = chatlog.scrollHeight - chatlog.scrollTop - chatlog.clientHeight < 80;
-        chatlog.innerHTML = tr.length
-          ? tr.map(chatMsgHtml).join('')
-          : '<div class="chatempty">Chat with the dispatcher — plan work, then hit ＋ Spawn to delegate it.</div>';
-        if (nearBottom) chatlog.scrollTop = chatlog.scrollHeight;
+        // Only rebuild the log when the transcript actually changed — otherwise a
+        // telemetry-only tick would wipe an in-progress edit of a Spawn brief.
+        const last = tr[tr.length - 1];
+        const key = tr.length + '|' + (last ? last.role + ':' + (last.text || last.tool || '').length : '');
+        if (key !== renderChat._key) {
+          renderChat._key = key;
+          const nearBottom = chatlog.scrollHeight - chatlog.scrollTop - chatlog.clientHeight < 80;
+          chatlog.innerHTML = tr.length
+            ? tr.map(chatMsgHtml).join('')
+            : '<div class="chatempty">Chat with the dispatcher — plan work, then hit ＋ Spawn to delegate it.</div>';
+          wireSpawnCards();
+          if (nearBottom) chatlog.scrollTop = chatlog.scrollHeight;
+        }
       }
 
       const chatEv = new EventSource('/api/chat/events');
@@ -544,12 +635,15 @@
       const termBody = document.getElementById('termBody');
       const termIn = document.getElementById('termIn');
       const termShell = document.getElementById('termShell');
-      let termEv = null, termStarted = false;
+      const termCwd = document.getElementById('termCwd');
+      let termEv = null, termId = 'base';
+      const termInited = new Set(); // ids we've applied the saved (non-cmd) shell to
       // Remember the operator's shell choice; default cmd (no PowerShell required).
       termShell.value = localStorage.getItem('cockpit.shell') || 'cmd';
+
       function connectTerm() {
-        if (termEv) return;
-        termEv = new EventSource('/api/terminal/events');
+        if (termEv) { termEv.close(); termEv = null; }
+        termEv = new EventSource(`/api/terminal/${termId}/events`);
         termEv.onmessage = (m) => {
           try {
             const { chunk } = JSON.parse(m.data);
@@ -561,36 +655,40 @@
         };
         termEv.onerror = () => {};
       }
-      function openTerm(on) {
-        const show = on ?? !termPanel.classList.contains('open');
-        termPanel.classList.toggle('open', show);
-        if (show) {
-          connectTerm();
-          // On first open, if the saved shell isn't the server default (cmd), switch to it.
-          if (!termStarted) {
-            termStarted = true;
-            if (termShell.value !== 'cmd') { termOut.textContent = ''; post('/api/terminal/reset', { shell: termShell.value }); }
-          }
-          // Focus AFTER the slide-in transform settles (Edge drops focus mid-transition).
-          setTimeout(() => termIn.focus(), 220);
-        }
+      function initShell() {
+        if (termShell.value !== 'cmd' && !termInited.has(termId)) post(`/api/terminal/${termId}/reset`, { shell: termShell.value });
+        termInited.add(termId);
       }
-      document.getElementById('termToggle').addEventListener('click', () => openTerm());
-      document.getElementById('termClose').addEventListener('click', () => openTerm(false));
-      document.getElementById('termReset').addEventListener('click', () => { termOut.textContent = ''; post('/api/terminal/reset', { shell: termShell.value }); });
+      // Open the flyout aimed at a terminal (id 'base' or a session id).
+      function openTermFor(id, label) {
+        if (id !== termId) { termId = id; termOut.textContent = ''; if (termEv) { termEv.close(); termEv = null; } }
+        termCwd.textContent = '· ' + label;
+        connectTerm(); initShell();
+        termPanel.classList.add('open');
+        setTimeout(() => termIn.focus(), 220); // focus after the slide-in settles
+      }
+      function closeTerm() { termPanel.classList.remove('open'); }
+      // Header button / Ctrl+` toggle the BASE terminal.
+      function toggleBaseTerm() {
+        if (termPanel.classList.contains('open') && termId === 'base') closeTerm();
+        else openTermFor('base', 'base repo');
+      }
+      document.getElementById('termToggle').addEventListener('click', toggleBaseTerm);
+      document.getElementById('termClose').addEventListener('click', closeTerm);
+      document.getElementById('termReset').addEventListener('click', () => { termOut.textContent = ''; post(`/api/terminal/${termId}/reset`, { shell: termShell.value }); });
       document.getElementById('termClear').addEventListener('click', () => { termOut.textContent = ''; });
       termShell.addEventListener('change', () => {
         localStorage.setItem('cockpit.shell', termShell.value);
+        termInited.add(termId);
         termOut.textContent = '';
-        connectTerm();
-        post('/api/terminal/reset', { shell: termShell.value });
+        post(`/api/terminal/${termId}/reset`, { shell: termShell.value });
       });
       // Command history (up/down recall). termHistIdx === termHist.length means
       // "at the live draft" (past the newest entry).
       let termHist = [], termHistIdx = 0, termDraft = '';
       function termSend() {
         const cmd = termIn.value;
-        post('/api/terminal/input', { data: cmd }); // the shell echoes it back
+        post(`/api/terminal/${termId}/input`, { data: cmd }); // the shell echoes it back
         if (cmd.trim() && termHist[termHist.length - 1] !== cmd) termHist.push(cmd);
         termHistIdx = termHist.length; // reset to the live draft slot
         termDraft = '';
@@ -636,10 +734,10 @@
         else if (e.key === 'Backspace') { e.preventDefault(); termIn.focus(); termIn.value = termIn.value.slice(0, -1); }
         else if (e.key.length === 1) { e.preventDefault(); termIn.focus(); termIn.value += e.key; }
       });
-      // Ctrl+` toggles the terminal; Escape closes it.
+      // Ctrl+` toggles the base terminal; Escape closes it.
       document.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && (e.key === '`' || e.code === 'Backquote')) { e.preventDefault(); openTerm(); }
-        else if (e.key === 'Escape' && termPanel.classList.contains('open')) { e.preventDefault(); openTerm(false); }
+        if (e.ctrlKey && (e.key === '`' || e.code === 'Backquote')) { e.preventDefault(); toggleBaseTerm(); }
+        else if (e.key === 'Escape' && termPanel.classList.contains('open')) { e.preventDefault(); closeTerm(); }
       });
 
       /* ================= SESSION CARDS ================= */
@@ -664,6 +762,15 @@
             post(`/api/sessions/${s.id}/interrupt`, {}));
           el.querySelector('[data-vscode]')?.addEventListener('click', () =>
             post(`/api/sessions/${s.id}/open-vscode`, {}));
+          el.querySelector('[data-term]')?.addEventListener('click', () =>
+            openTermFor(s.id, esc(s.branch)));
+          el.querySelectorAll('[data-manifest-run]').forEach((btn) =>
+            btn.addEventListener('click', () => {
+              const cmd = s.manifest && s.manifest[btn.dataset.manifestRun];
+              if (!cmd) return;
+              openTermFor(s.id, esc(s.branch));
+              setTimeout(() => post(`/api/terminal/${s.id}/input`, { data: cmd }), 500); // let the shell spawn first
+            }));
           el.querySelector('[data-remove]')?.addEventListener('click', () =>
             fetch(`/api/sessions/${s.id}`, { method: 'DELETE' }));
           el.querySelector('[data-send]')?.addEventListener('click', () => {
@@ -728,11 +835,14 @@
             <div class="ctx"><i class="${ctxCls}" style="width:${ctxPct}%"></i></div>
           </div>
           ${perm}
+          ${s.uncommitted ? `<div class="uncommitted">⚠ Finished with uncommitted work — the agent must commit all changes to its branch.</div>` : ''}
           ${mergeHtml(s)}
           <div class="preview"><div class="plabel">latest output</div>${s.lastText ? esc(s.lastText) : '(waiting for output…)'}</div>
           <div class="actions">
             <input data-msg placeholder="send a follow-up message…" style="flex:1" />
             <button data-send>Send</button>
+            ${manifestButtons(s)}
+            <button class="ghost" data-term title="Open a terminal in this session's worktree">▸_ Term</button>
             ${s.finishedAt
               ? `<a class="btn ${s.error ? 'deny' : 'ok'}" href="/api/sessions/${s.id}/results" target="_blank" rel="noopener" title="${s.error ? 'Finished with error: ' + esc(s.error) : 'Finished successfully'} — open results (stats, final result, diff)">📄 Results</a>`
               : `<button class="ghost" disabled title="Enabled when the agent finishes a turn">📄 Results</button>`}
@@ -741,6 +851,18 @@
             <button class="ghost" data-remove>✕ Remove</button>
           </div>
         </div>`;
+      }
+
+      // Buttons for whatever build/run/test commands the repo's own .cockpit.json
+      // defines — none if it defines nothing (no hidden ioSender-specific default).
+      const MANIFEST_LABELS = { run: '▶ Run', build: '🔨 Build', test: '✓ Test' };
+      function manifestButtons(s) {
+        const m = s.manifest;
+        if (!m) return '';
+        return ['run', 'build', 'test']
+          .filter((k) => m[k])
+          .map((k) => `<button class="ghost" data-manifest-run="${k}" title="${esc(m[k])}">${MANIFEST_LABELS[k]}</button>`)
+          .join('');
       }
 
       function mergeHtml(s) {

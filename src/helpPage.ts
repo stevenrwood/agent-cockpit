@@ -61,6 +61,8 @@ export function renderHelp(): string {
     <a href="#cards">Working a session</a>
     <a href="#merge">Merge sequencing</a>
     <a href="#terminal">Terminal</a>
+    <a href="#manifest">Build &amp; Run (.cockpit.json)</a>
+    <a href="#commit">Commit rule</a>
     <a href="#patterns">Common patterns</a>
     <a href="#keys">Shortcuts</a>
     <a href="#config">Config</a>
@@ -89,6 +91,12 @@ export function renderHelp(): string {
     <p>It's <b>one logical permanent session</b>, but when its context passes ~80% it silently
       <b>recycles</b> — starts a fresh underlying context seeded with a short summary — so it never bogs
       down. Your on-screen transcript is kept. <span class="pill">↺ New chat</span> recycles it manually.</p>
+    <h3>Proposing a session — one click, no copy/paste</h3>
+    <p>When the dispatcher has a concrete piece of work to delegate, it renders an inline
+      <b>proposed-session card</b> right in the chat: the goal (editable), repo/model/permissions
+      prefilled from your last spawn (also editable). Tweak anything, then click
+      <span class="pill">▸ Spawn session</span> once — it becomes a worker card below. Nothing to
+      paste anywhere.</p>
   </section>
 
   <section id="submit">
@@ -136,6 +144,11 @@ export function renderHelp(): string {
       <li><b>Interrupt</b> — stop the current turn. <b>✕ Remove</b> — dispose + drop the worktree (branch kept).</li>
       <li><span class="pill">📄 Results</span> (enabled when a turn finishes) — a page with stats, the final
         result, and the diff vs base. Green on success, red on error.</li>
+      <li><span class="pill">▸_ Term</span> — a persistent terminal scoped to <em>this session's worktree</em>
+        (separate from the header's base-repo terminal) — see <a href="#terminal">Terminal</a>.</li>
+      <li>If the repo defines a <code>.cockpit.json</code>, buttons for its <b>🔨 Build</b> /
+        <b>▶ Run</b> / <b>✓ Test</b> commands appear here too — see
+        <a href="#manifest">Build &amp; Run</a>.</li>
     </ul>
   </section>
 
@@ -168,6 +181,32 @@ export function renderHelp(): string {
       <li><b>History</b>: <kbd>↑</kbd> / <kbd>↓</kbd> recall previous commands. Just start typing — focus is captured for you.</li>
       <li><span class="pill">↺ restart</span> kills and respawns the shell (also how you switch shells).</li>
     </ul>
+  </section>
+
+  <section id="manifest">
+    <h2>Build &amp; Run — <code>.cockpit.json</code></h2>
+    <p>The cockpit never guesses a repo-specific build/test/launch command. A repo opts in by
+      committing a <code>.cockpit.json</code> at its root:</p>
+    <pre style="background:var(--panel2);border-radius:8px;padding:12px 14px;overflow:auto;font-size:13px;line-height:1.5">{
+  "build": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug",
+  "run":   "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug -Launch",
+  "test":  "npm test"
+}</pre>
+    <p>All three keys are optional. A worker card shows a button only for the ones the repo
+      defines — <b>no manifest, no buttons</b>. Read once from the session's <b>worktree</b> at
+      spawn time (so a branch that edits the manifest is honored); clicking a button opens that
+      session's terminal and runs the command there, so you watch it build/launch/test live.</p>
+  </section>
+
+  <section id="commit">
+    <h2>The commit rule</h2>
+    <p>Every worker session is instructed to <b>commit all of its work</b> to its branch before
+      stopping, and to put any spec/design doc it produces <b>in the repo</b> (e.g. a
+      <code>docs/</code> folder) — never a temp or scratch directory.</p>
+    <p>The cockpit backs this up: if a turn ends with a <b>dirty worktree</b>, the card shows an
+      <span class="pill r">⚠ uncommitted work</span> banner and the agent gets one automatic nudge
+      to commit everything. There is no manual "commit" button — the point is that a finished
+      session's branch <em>is</em> the reviewable change list.</p>
   </section>
 
   <section id="patterns">
