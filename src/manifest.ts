@@ -1,19 +1,17 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-export interface RepoManifest {
-  build?: string;
-  run?: string;
-  test?: string;
-}
+/** An arbitrary {label: command} map — the repo defines its own action names. */
+export type RepoManifest = Record<string, string>;
 
-const KEYS: (keyof RepoManifest)[] = ['build', 'run', 'test'];
+const MAX_ACTIONS = 8; // sane cap so a malformed/huge file can't flood a card with buttons
 
 /**
- * Read `.cockpit.json` from a worktree root — the repo's own definition of what
- * "build" / "run" / "test" mean to it. No file, no buttons: the cockpit never
- * guesses a repo-specific command (e.g. a hardcoded build.ps1 invocation).
- * Only string fields for the three known keys are kept; anything else is ignored.
+ * Read `.cockpit.json` from a worktree root — the repo's own definition of
+ * whatever actions it wants a click-to-run button for (e.g. "Test (Debug)",
+ * "Test (Release)", or anything else). The cockpit has NO built-in notion of
+ * build/run/test; it only renders one button per entry, in file order. No
+ * file, no buttons: it never guesses a repo-specific command.
  */
 export function readManifest(cwd: string): RepoManifest | undefined {
   let raw: string;
@@ -28,11 +26,11 @@ export function readManifest(cwd: string): RepoManifest | undefined {
   } catch {
     return undefined; // malformed — treat as absent rather than crash the spawn
   }
-  if (typeof parsed !== 'object' || parsed === null) return undefined;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
   const out: RepoManifest = {};
-  for (const k of KEYS) {
-    const v = (parsed as Record<string, unknown>)[k];
-    if (typeof v === 'string' && v.trim()) out[k] = v;
+  for (const [label, cmd] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof cmd === 'string' && cmd.trim() && label.trim()) out[label] = cmd;
+    if (Object.keys(out).length >= MAX_ACTIONS) break;
   }
   return Object.keys(out).length ? out : undefined;
 }

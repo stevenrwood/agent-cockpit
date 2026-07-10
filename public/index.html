@@ -766,7 +766,7 @@
             openTermFor(s.id, esc(s.branch)));
           el.querySelectorAll('[data-manifest-run]').forEach((btn) =>
             btn.addEventListener('click', () => {
-              const cmd = s.manifest && s.manifest[btn.dataset.manifestRun];
+              const cmd = s.manifest && s.manifest[btn.dataset.manifestRun]; // key = the repo's own label
               if (!cmd) return;
               openTermFor(s.id, esc(s.branch));
               setTimeout(() => post(`/api/terminal/${s.id}/input`, { data: cmd }), 500); // let the shell spawn first
@@ -853,15 +853,16 @@
         </div>`;
       }
 
-      // Buttons for whatever build/run/test commands the repo's own .cockpit.json
-      // defines — none if it defines nothing (no hidden ioSender-specific default).
-      const MANIFEST_LABELS = { run: '▶ Run', build: '🔨 Build', test: '✓ Test' };
+      // Buttons for whatever arbitrary {label: command} actions the repo's own
+      // .cockpit.json defines — the cockpit has no built-in notion of what
+      // those actions are; it just renders one button per entry, in file order.
+      // No manifest, no buttons (no hidden ioSender-specific default).
+      function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
       function manifestButtons(s) {
         const m = s.manifest;
         if (!m) return '';
-        return ['run', 'build', 'test']
-          .filter((k) => m[k])
-          .map((k) => `<button class="ghost" data-manifest-run="${k}" title="${esc(m[k])}">${MANIFEST_LABELS[k]}</button>`)
+        return Object.entries(m)
+          .map(([label, cmd]) => `<button class="ghost" data-manifest-run="${escAttr(label)}" title="${escAttr(cmd)}">▶ ${esc(label)}</button>`)
           .join('');
       }
 

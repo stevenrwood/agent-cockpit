@@ -66,8 +66,9 @@ table). The core loop:
    `POST /api/sessions/:id/permission {permissionId, allow, message?}`.
 3. **Follow up / interrupt / take over** — send more messages, interrupt, or **⧉ VS Code** to
    open that worktree and work by hand. **⟳ Term** opens a terminal scoped to that worktree.
-   If the repo commits a `.cockpit.json` (`{build?, run?, test?}`), the card shows a button per
-   command it defines — the cockpit never guesses a build command.
+   If the repo commits a `.cockpit.json` (an arbitrary `{label: command}` map, e.g.
+   `{"Test (Debug)": "..."}`), the card shows one button per entry — the cockpit has no
+   built-in notion of build/run/test and never guesses a command.
 3a. **Workers must commit everything** — the system prompt directs it, and the cockpit flags
    a session `uncommitted` (and nudges once) if a turn ends with a dirty worktree. Specs/design
    docs belong in the repo, never a temp folder.
@@ -105,7 +106,8 @@ Native non-Anthropic agents (a real GPT/Gemini agent, or CLI agents like aider) 
 - `src/autocorrect.ts` — the one-shot Haiku clean-only pass for the two-stage chat submit.
 - `src/terminal.ts` — `Terminal` (one piped shell, cmd/bash/powershell) + `TerminalManager`
   (keyed by id: `base` or a session id) behind the base and per-session flyout terminals.
-- `src/manifest.ts` — reads/validates a repo's `.cockpit.json` (`{build?, run?, test?}`).
+- `src/manifest.ts` — reads/validates a repo's `.cockpit.json` as an arbitrary
+  `{label: command}` map (up to 8 entries); no cockpit-side knowledge of what the labels mean.
 - `src/sessionManager.ts` — worktree lifecycle, session registry, SSE fan-out, and all merge
   sequencing (integration worktree, merge/abort/promote, teardown).
 - `src/git.ts` — non-throwing git helpers (ahead/behind, trial-merge conflict preflight,

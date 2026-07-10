@@ -105,22 +105,22 @@ a long-lived piped shell with persistent cwd + env and **zero native dependencie
 
 ## Build & Run — repo-defined via `.cockpit.json`
 
-The cockpit never guesses a repo-specific build/test/launch command. A repo opts in by
-committing a `.cockpit.json` at its root:
+The cockpit has **no built-in notion** of what "build", "run", or "test" mean — it never
+guesses a repo-specific command. A repo opts in by committing an arbitrary `{label: command}`
+map as `.cockpit.json` at its root, e.g.:
 
 ```json
 {
-  "build": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug",
-  "run":   "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug -Launch",
-  "test":  "npm test"
+  "Test (Debug)":   "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug -Launch",
+  "Test (Release)": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Release -Launch"
 }
 ```
 
-All three keys are optional strings; the worker card shows a button only for the ones
-present (**🔨 Build** / **▶ Run** / **✓ Test**) — no manifest, no buttons. Read once from
-the session's **worktree** at spawn time (so a branch that edits `.cockpit.json` is
-honored), the chosen command runs in that worktree and streams into that session's
-terminal (see below).
+Any number of entries (up to 8) with any labels are allowed — a repo defines exactly the
+actions that make sense to it. The worker card shows one button per entry, in file order —
+**no manifest, no buttons.** Read once from the session's **worktree** at spawn time (so a
+branch that edits `.cockpit.json` is honored), clicking a button opens that session's own
+terminal and runs its command there.
 
 ## Per-session terminal
 

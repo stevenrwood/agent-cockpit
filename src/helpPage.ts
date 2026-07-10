@@ -146,9 +146,8 @@ export function renderHelp(): string {
         result, and the diff vs base. Green on success, red on error.</li>
       <li><span class="pill">▸_ Term</span> — a persistent terminal scoped to <em>this session's worktree</em>
         (separate from the header's base-repo terminal) — see <a href="#terminal">Terminal</a>.</li>
-      <li>If the repo defines a <code>.cockpit.json</code>, buttons for its <b>🔨 Build</b> /
-        <b>▶ Run</b> / <b>✓ Test</b> commands appear here too — see
-        <a href="#manifest">Build &amp; Run</a>.</li>
+      <li>If the repo defines a <code>.cockpit.json</code>, one button per action it lists
+        appears here too — see <a href="#manifest">Build &amp; Run</a>.</li>
     </ul>
   </section>
 
@@ -185,17 +184,18 @@ export function renderHelp(): string {
 
   <section id="manifest">
     <h2>Build &amp; Run — <code>.cockpit.json</code></h2>
-    <p>The cockpit never guesses a repo-specific build/test/launch command. A repo opts in by
-      committing a <code>.cockpit.json</code> at its root:</p>
+    <p>The cockpit has <b>no built-in notion</b> of what "build", "run", or "test" mean — it
+      never guesses a repo-specific command. A repo opts in by committing an arbitrary
+      <code>{label: command}</code> map as <code>.cockpit.json</code> at its root:</p>
     <pre style="background:var(--panel2);border-radius:8px;padding:12px 14px;overflow:auto;font-size:13px;line-height:1.5">{
-  "build": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug",
-  "run":   "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug -Launch",
-  "test":  "npm test"
+  "Test (Debug)":   "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Debug -Launch",
+  "Test (Release)": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\build.ps1 -Configuration Release -Launch"
 }</pre>
-    <p>All three keys are optional. A worker card shows a button only for the ones the repo
-      defines — <b>no manifest, no buttons</b>. Read once from the session's <b>worktree</b> at
-      spawn time (so a branch that edits the manifest is honored); clicking a button opens that
-      session's terminal and runs the command there, so you watch it build/launch/test live.</p>
+    <p>Any number of entries (up to 8), any labels — a repo defines exactly the actions that
+      make sense to it. A worker card shows one button per entry, in file order —
+      <b>no manifest, no buttons</b>. Read once from the session's <b>worktree</b> at spawn time
+      (so a branch that edits the manifest is honored); clicking a button opens that session's
+      terminal and runs the command there, so you watch it live.</p>
   </section>
 
   <section id="commit">

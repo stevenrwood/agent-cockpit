@@ -6,6 +6,9 @@
 // native GPT/Gemini agents, CLI agents) become additional drivers later — nothing
 // in the shell is Claude-specific.
 
+import type { RepoManifest } from './manifest.js';
+export type { RepoManifest };
+
 export type SessionStatus =
   | 'starting' // spawning / first message in flight
   | 'running' // agent actively working
@@ -94,13 +97,6 @@ export interface SessionDriver {
   dispose(): void;
 }
 
-/** The repo's own build/run/test commands, from its `.cockpit.json`. */
-export interface RepoManifest {
-  build?: string;
-  run?: string;
-  test?: string;
-}
-
 export interface MergeStatus {
   baseBranch: string; // the ultimate base this session came off
   targetBranch: string; // where merges actually land: the integration branch (or base until it exists)
@@ -125,5 +121,5 @@ export interface SessionSnapshot extends DriverState {
   createdAt: number;
   merge?: MergeStatus;
   uncommitted?: boolean; // true once a turn finished with a dirty worktree (must commit all work)
-  manifest?: RepoManifest; // the repo's own build/run/test commands, if it defines any
+  manifest?: RepoManifest; // the repo's own {label: command} actions, if it defines any
 }
