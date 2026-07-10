@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ClaudeAgentDriver } from './drivers/claudeAgent.js';
 import * as g from './git.js';
+import { renderResults } from './resultsView.js';
 import type { MergeStatus, PermissionDecision, SessionDriver, SessionSnapshot } from './types.js';
 
 const exec = promisify(execFile);
@@ -32,6 +33,7 @@ export interface CreateSessionInput {
   baseURL?: string;
   apiKey?: string;
   permissionMode?: 'default' | 'acceptEdits' | 'plan';
+  permissionPolicy?: 'ask' | 'acceptEdits' | 'bypass';
 }
 
 /** Owns worktrees + the session registry, and fans out change events (SSE). */
@@ -103,10 +105,20 @@ export class SessionManager {
       baseURL: input.baseURL,
       apiKey: input.apiKey,
       permissionMode: input.permissionMode,
+      permissionPolicy: input.permissionPolicy,
     });
 
     this.emit();
     return this.snapshots().find((s) => s.id === id)!;
+  }
+
+  /** Rendered HTML results page for a finished session (goal, stats, result, diff). */
+  async resultsHtml(id: string): Promise<string | null> {
+    const s = this.sessions.get(id);
+    if (!s) return null;
+    const snap = this.snapshots().find((x) => x.id === id)!;
+    const { status, patch } = await g.resultsDiff(s.cwd, s.baseBranch);
+    return renderResults(snap, status, patch);
   }
 
   answerPermission(id: string, permissionId: string, decision: PermissionDecision): boolean {

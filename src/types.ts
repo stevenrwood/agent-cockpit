@@ -35,6 +35,8 @@ export interface DriverState {
   contextWindow?: number; // max tokens the model can hold
   contextUsed?: number; // best-effort: tokens in context on the last turn
   lastText?: string; // most recent assistant text (card preview)
+  resultText?: string; // the agent's final result text (set when a turn completes)
+  finishedAt?: number; // ms epoch of the last completed turn (enables the Results view)
   pending?: PendingPermission; // set iff status === 'awaiting-input'
   error?: string;
 }
@@ -46,6 +48,13 @@ export interface DriverStartOptions {
   baseURL?: string; // Tier-1: point the harness at a gateway (LiteLLM/Ollama/...)
   apiKey?: string; // optional per-session key for that gateway
   permissionMode?: 'default' | 'acceptEdits' | 'plan';
+  // Cockpit-side auto-approval policy (independent of the SDK permissionMode).
+  // canUseTool stays active so the cockpit remains the source of truth; this
+  // just decides which requests the cockpit answers itself vs. flashes for you.
+  //   'ask'         — flash + wait for Allow/Deny on everything (most oversight)
+  //   'acceptEdits' — cockpit auto-approves file-edit tools; flashes for the rest
+  //   'bypass'      — cockpit auto-approves everything (no flashing)
+  permissionPolicy?: 'ask' | 'acceptEdits' | 'bypass';
 }
 
 export interface PermissionDecision {

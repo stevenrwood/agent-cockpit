@@ -46,6 +46,13 @@
       button.ok { background: var(--ok); color: #fff; border: none; }
       button.deny { background: var(--flash); color: #fff; border: none; }
       button.ghost { background: transparent; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      a.btn {
+        display: inline-flex; align-items: center; text-decoration: none;
+        font: inherit; color: var(--text); background: var(--panel2);
+        border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+      }
+      a.btn:hover { filter: brightness(0.97); }
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
       .card {
         background: var(--panel); border: 1px solid var(--border);
@@ -132,7 +139,16 @@
             <option value="claude-fable-5">Fable 5 — creative/writing</option>
           </select>
         </label>
+        <label>
+          <span>Permissions</span>
+          <select name="permissionPolicy" id="permSel">
+            <option value="acceptEdits">Accept edits — cockpit auto-approves file edits</option>
+            <option value="bypass">Bypass — auto-approve everything</option>
+            <option value="ask">Ask — flash for every tool</option>
+          </select>
+        </label>
         <div class="hint full" id="modelHint">Default: inherits the cockpit's model (Opus 4.8) — best for hard reasoning, big refactors, and design work.</div>
+        <div class="hint full" id="permHint">Accept edits: the cockpit auto-approves Edit/Write/MultiEdit/NotebookEdit so you don't approve edits — but still flashes for Bash and other tools.</div>
         <label class="full">
           <span>baseURL (optional — Tier-1 provider swap, e.g. a LiteLLM gateway or local model)</span>
           <input name="baseURL" placeholder="http://localhost:4000" />
@@ -163,6 +179,15 @@
       const modelSel = document.getElementById('modelSel');
       const modelHint = document.getElementById('modelHint');
       modelSel.addEventListener('change', () => { modelHint.textContent = MODEL_HINTS[modelSel.value] || ''; });
+
+      const PERM_HINTS = {
+        'acceptEdits': "Accept edits: the cockpit auto-approves Edit/Write/MultiEdit/NotebookEdit so you don't approve edits — but still flashes for Bash and other tools.",
+        'bypass': 'Bypass: the cockpit auto-approves EVERY tool (incl. Bash/network) — no flashing, fully autonomous. Max speed, least oversight.',
+        'ask': 'Ask: flash and wait for Allow/Deny on every non-trivial tool, including edits. Most oversight.',
+      };
+      const permSel = document.getElementById('permSel');
+      const permHint = document.getElementById('permHint');
+      permSel.addEventListener('change', () => { permHint.textContent = PERM_HINTS[permSel.value] || ''; });
 
       function esc(s) { return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
       function post(path, body) {
@@ -248,6 +273,9 @@
           <div class="actions">
             <input data-msg placeholder="send a follow-up message…" style="flex:1" />
             <button data-send>Send</button>
+            ${s.finishedAt
+              ? `<a class="btn" href="/api/sessions/${s.id}/results" target="_blank" rel="noopener" title="Open the results page (stats, final result, diff)">📄 Results</a>`
+              : `<button class="ghost" disabled title="Enabled when the agent finishes a turn">📄 Results</button>`}
             <button class="ghost" data-vscode title="Open this worktree in a new VS Code window">⧉ VS Code</button>
             <button class="ghost" data-interrupt>Interrupt</button>
             <button class="ghost" data-remove>✕ Remove</button>
@@ -302,6 +330,7 @@
           repo,
           model: f.model.value.trim() || undefined,
           baseURL: f.baseURL.value.trim() || undefined,
+          permissionPolicy: f.permissionPolicy.value || undefined,
         };
         const r = await post('/api/sessions', body);
         if (!r.ok) { const err = await r.json().catch(() => ({})); alert('Failed: ' + (err.error || r.status)); return; }

@@ -69,6 +69,8 @@ export class ClaudeAgentDriver implements SessionDriver {
   private abort = new AbortController();
   private permCounter = 0;
   private pending = new Map<string, PendingResolver>();
+  private policy: 'ask' | 'acceptEdits' | 'bypass' = 'ask';
+  private cumOutput = 0; // running sum of output tokens across the session (live)
 
   constructor(private onChange: () => void) {}
 
@@ -87,6 +89,8 @@ export class ClaudeAgentDriver implements SessionDriver {
     const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     if (opts.baseURL) env.ANTHROPIC_BASE_URL = opts.baseURL;
     if (opts.apiKey) env.ANTHROPIC_API_KEY = opts.apiKey;
+
+    this.policy = opts.permissionPolicy ?? 'ask';
 
     this.q = query({
       prompt: this.input as any,
@@ -113,6 +117,12 @@ export class ClaudeAgentDriver implements SessionDriver {
   }
 
   private requestPermission(toolName: string, input: Record<string, unknown>): Promise<any> {
+    // Cockpit-side auto-approval: keep canUseTool active (so the cockpit is the
+    // sole permission authority) but answer edit-class (or all) tools ourselves
+    // instead of flashing. Everything else still routes to the operator.
+    if (this.shouldAutoApprove(toolName)) {
+      return Promise.resolve({ behavior: 'allow', updatedInput: input });
+    }
     const id = `p${++this.permCounter}`;
     return new Promise((resolve) => {
       this.pending.set(id, resolve);
@@ -121,6 +131,12 @@ export class ClaudeAgentDriver implements SessionDriver {
         pending: { id, toolName, input, createdAt: Date.now() },
       });
     });
+  }
+
+  private shouldAutoApprove(toolName: string): boolean {
+    if (this.policy === 'bypass') return true;
+    if (this.policy === 'acceptEdits') return EDIT_TOOLS.has(toolName);
+    return false;
   }
 
   answerPermission(permissionId: string, decision: PermissionDecision): boolean {
@@ -187,15 +203,23 @@ export class ClaudeAgentDriver implements SessionDriver {
         case 'assistant': {
           const text = extractText(msg.message?.content);
           const usage = msg.message?.usage;
+          // Live telemetry: a `result` only lands at end-of-turn, so update the
+          // token/context figures off every assistant message — otherwise a long
+          // "still thinking" turn shows 0 tokens the whole time. Output is a
+          // running sum (each call emits new output); input is the latest call's
+          // prompt size (summing it would double-count the growing context).
           const contextUsed = usage
             ? (usage.input_tokens ?? 0) +
               (usage.cache_read_input_tokens ?? 0) +
               (usage.cache_creation_input_tokens ?? 0)
             : this.state.contextUsed;
+          if (usage?.output_tokens) this.cumOutput += usage.output_tokens;
           this.set({
             status: 'running',
             lastText: text || this.state.lastText,
             contextUsed,
+            inputTokens: usage?.input_tokens ?? this.state.inputTokens,
+            outputTokens: this.cumOutput || this.state.outputTokens,
           });
           break;
         }
@@ -203,14 +227,17 @@ export class ClaudeAgentDriver implements SessionDriver {
         case 'result': {
           const modelName = Object.keys(msg.modelUsage ?? {})[0];
           const mu = modelName ? msg.modelUsage[modelName] : undefined;
+          const finalText = msg.subtype === 'success' ? msg.result : undefined;
+          // turns/cost/window are authoritative here; token counts are left as
+          // the live cumulative from assistant messages (don't clobber them).
           this.set({
             status: 'idle', // turn complete; session stays alive for follow-ups
             turns: msg.num_turns,
             costUsd: msg.total_cost_usd,
-            inputTokens: msg.usage?.input_tokens ?? this.state.inputTokens,
-            outputTokens: msg.usage?.output_tokens ?? this.state.outputTokens,
             contextWindow: mu?.contextWindow ?? this.state.contextWindow,
-            lastText: msg.subtype === 'success' ? msg.result || this.state.lastText : this.state.lastText,
+            lastText: finalText || this.state.lastText,
+            resultText: finalText || this.state.resultText,
+            finishedAt: Date.now(),
             error: msg.subtype !== 'success' ? msg.subtype : this.state.error,
           });
           break;
@@ -223,6 +250,10 @@ export class ClaudeAgentDriver implements SessionDriver {
     }
   }
 }
+
+// File-mutating tools the 'acceptEdits' policy auto-approves. Bash is
+// deliberately excluded — it can do anything, so it still flashes.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 // Best-known context windows for current models (authoritative value still
 // arrives from the SDK's modelUsage on the first result and overrides this).

@@ -20,6 +20,20 @@ function git(cwd: string, args: string[]): Promise<RunResult> {
   });
 }
 
+/**
+ * What this session changed vs its base branch, for the Results view:
+ * `status` = porcelain list (incl. untracked ?? files), `patch` = full diff of
+ * tracked changes (committed + working-tree) against base.
+ */
+export async function resultsDiff(
+  worktree: string,
+  base: string,
+): Promise<{ status: string; patch: string }> {
+  const status = await git(worktree, ['status', '--porcelain']);
+  const patch = await git(worktree, ['diff', base]);
+  return { status: status.stdout, patch: patch.stdout };
+}
+
 export async function currentBranch(repo: string): Promise<string> {
   const r = await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']);
   return r.stdout.trim();

@@ -108,6 +108,14 @@ const server = http.createServer(async (req, res) => {
         const ok = manager.openInEditor(id);
         return send(res, ok ? 200 : 404, { ok });
       }
+      // Results page (HTML) for a finished session — goal, stats, result, diff.
+      if (method === 'GET' && action === 'results') {
+        const html = await manager.resultsHtml(id);
+        if (html == null) return send(res, 404, { error: 'not found' });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+        return;
+      }
       if (method === 'POST' && action === 'refresh-merge') {
         const ok = await manager.refreshMergeStatus(id);
         return send(res, ok ? 200 : 404, { ok });
