@@ -203,6 +203,15 @@
       const permHint = document.getElementById('permHint');
       permSel.addEventListener('change', () => { permHint.textContent = PERM_HINTS[permSel.value] || ''; });
 
+      // Restore last-used model + permission policy (persist across browser/server
+      // restarts). getItem returns null when absent; '' is a valid saved value (Default model).
+      const savedModel = localStorage.getItem('cockpit.lastModel');
+      if (savedModel !== null) modelSel.value = savedModel;
+      const savedPolicy = localStorage.getItem('cockpit.lastPolicy');
+      if (savedPolicy) permSel.value = savedPolicy;
+      modelHint.textContent = MODEL_HINTS[modelSel.value] || '';
+      permHint.textContent = PERM_HINTS[permSel.value] || '';
+
       function esc(s) { return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
       function post(path, body) {
         return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -360,7 +369,10 @@
         };
         const r = await post('/api/sessions', body);
         if (!r.ok) { const err = await r.json().catch(() => ({})); alert('Failed: ' + (err.error || r.status)); return; }
-        localStorage.setItem('cockpit.lastRepo', repo); // remember for next spawn
+        // remember repo + dropdown choices for next spawn (survives restarts)
+        localStorage.setItem('cockpit.lastRepo', repo);
+        localStorage.setItem('cockpit.lastModel', f.model.value);
+        localStorage.setItem('cockpit.lastPolicy', f.permissionPolicy.value);
         f.goal.value = '';
       });
 
