@@ -113,6 +113,9 @@ export function renderHelp(): string {
     </ol>
     <div class="tip">Edit after a clean and the arrow goes back to orange <span class="pill">✦↑</span> —
       a single click re-cleans your edit; double-click still sends as-is.</div>
+    <p style="font-size:13px;color:var(--dim)"><b>Grammarly still showing up?</b> Text fields already
+      carry the standard opt-out attributes, but current Grammarly builds often ignore them. Right-click
+      the Grammarly icon inside the field → <b>"Ignore this site"</b> — sticks across restarts.</p>
   </section>
 
   <section id="spawn">

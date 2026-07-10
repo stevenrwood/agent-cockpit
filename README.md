@@ -229,6 +229,15 @@ into the same account), browse to `http://<this-pc-tailscale-ip>:8770` (find the
 `tailscale ip -4` or `tailscale status`). To remove the rule later:
 `Remove-NetFirewallRule -DisplayName 'Agent Cockpit (Tailscale)'`.
 
+## Troubleshooting
+
+**Grammarly still shows up in a text field.** Every text input/textarea already carries
+`data-gramm="false"` / `data-gramm_editor="false"` / `spellcheck="false"`, the documented
+opt-out attributes — but current versions of the Grammarly browser extension often ignore
+them. The reliable fix is at the extension level: **right-click the Grammarly icon that
+appears inside the field → "Ignore this site"** (or disable Grammarly for `127.0.0.1` from
+the extension's toolbar menu). Sticks across restarts once set.
+
 ## Known open work (next slices)
 
 - Tier-2 drivers (native non-Claude agents) — **parked** for now. Tier-1 (route a session to
